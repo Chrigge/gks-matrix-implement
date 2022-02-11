@@ -1,0 +1,108 @@
+.wrapper {
+    width: 100%;
+    height: 100vh;
+    position: relative;
+}
+
+#overlayWindow {
+    position: absolute;
+    margin: auto;
+    width: 80%;
+    left: 10%;
+    top: 10vh;
+    height: 80vh;
+    border: 1px solid black;
+    background-color: white;
+    box-shadow: 8px 5px 5px darkslategray;
+    padding: 10px;
+    z-index: 10;
+
+}
+
+#overlayWindowCloseButton {
+    position: absolute;
+    z-index: 11;
+    left: 100% - 2em;
+    right: 0%;
+    top: 0%;
+    bottom: 95% - 2em;
+    outline: 1px solid darkslategray;
+}
+
+.mainWindow {
+    position: absolute;
+}
+
+
+.overlayNewVoteDiv {
+    align-items: stretch;
+    width: 100%;
+    height: 100%;
+}
+
+.overlayNewVoteColumn {
+    float: left;
+    width: 50%;
+    height: 100%; 
+}
+
+
+.chatScreen {
+    align-items: stretch;
+    width: 100%;
+    height: 100%;
+}
+
+.chatScreenColumn {
+    float: left;
+    width: 33.33%;
+    outline: 1px solid lightgray;
+}
+
+.chatScreenRow {
+    height:100vh;
+}
+
+.chatScreenRow:after {
+    content: "";
+    display: table;
+    clear: both;
+}
+
+
+
+
+.voteTitle {
+    background-color: lightgray;
+    font-size: 1.2em;
+}
+
+.voteDesc {
+    background-color: lightgray;
+    font-size: 1em;
+}
+
+.voteItem {
+    outline: 1px dashed gray;
+    font-size: 0.9em;
+}
+
+.voteItemEven {
+    background-color: lightseagreen;
+}
+
+.voteItemUneven {
+    background-color: lightskyblue;
+}
+
+.voteItemSelected {
+    background-color: lightgreen;
+}
+
+.voteItemAccepted {
+    background-color: green;
+}
+
+.voteItemRejected {
+    background-color: lightcoral;
+}

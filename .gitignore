@@ -1,0 +1,2 @@
+# Ignore authentication files (don't post the access token publicly!)
+auth.json

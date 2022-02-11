@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <base href="./">
+        <meta http-equiv="content-type" content="text/html; charset=utf-8">
+        <link rel="stylesheet" href="style.css">
+        <title>gks-matrix</title>
+    </head>
+
+
+
+    <body>
+        <script type="text/javascript"
+			src="https://code.jquery.com/jquery-3.6.0.js"
+			integrity="sha256-H+K7U5CnXl1h5ywQfKtSj8PCmoN9aaq30gDh27Xc0jk="
+			crossorigin="anonymous"></script>
+        <script src="client.js" type="text/javascript"></script>
+        <div id="wrapper">
+            <div id="mainWindow">
+                <div id="loginScreen">
+                    <h2>
+                        Login form
+                    </h2>
+                    <form class="loginForm">
+                        Username: <input type="text" id="usernameInput" name="usernameInput"></label>
+                        <br/>
+                        Password: <input type="password" id="passwordInput" name="passwordInput"></label>
+                        <br/>
+                        <input type="button" id="loginButton" value="Log in!"></input>
+                        <input type="button" id="selectRegistrationScreenButton" value="Register instead"></input>
+                    </form>
+                </div>
+
+                <div id="registrationScreen">
+                    <h2>
+                        Registration form
+                    </h2>
+                    <form class="registrationScreen">
+                        Username: <input type="text" id="registrationUsernameInput"></label>
+                        <br/>
+                        Password: <input type="password" id="registrationPasswordInput"></label>
+                        <br/>
+                        Repeat Password: <input type="password" id="registrationPasswordRepeatInput"></label>
+                        <br/>
+                        <input type="button" id="registrationButton" value="Register!"></input>
+                        <input type="button" id="selectLoginScreenButton" value="Login instead"></input>
+                    </form>
+                </div>
+
+                <div id="roomSelectScreen">
+                    <h2>
+                        Select room
+                    </h2>
+                    <form class="roomSelectScreen">
+                        Room name or ID: <input type="text" id="roomSelectInput" value="!HULaHFBnIxcwUEITua:gks-synapse"></label>
+                        <br/>
+                        <input type="button" id="roomSelectButton" value="Join room!"></input>
+                    </form>
+                </div>
+
+
+                <div id="chatScreen">
+                    <h2>
+                        Chat screen
+                    </h2>
+                    <p class="userInfo"></p>
+                    <br/><br/>
+
+                    <div class="chatScreenRow">
+                        <div class="chatMessagesDiv chatScreenColumn">
+                            <div id="chatMessages"></div>
+                            <div class="sendMessageDiv">
+                                <form class="sendMessage">
+                                    <input type="text" id="messageTextInput"></input>
+                                    <input type="button" id="sendMessageButton" value="Send!"></input>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="chatUsersDiv chatScreenColumn">
+                            <div id="chatUsers"></div>
+                            User list here
+                        </div>
+                        <div class="chatVotingDiv chatScreenColumn">
+                            <div id="chatVoting"></div>
+                            <input type="button" id="finishVoteButton" value="Finish voting!"></input>
+                            <input type="button" id="newVoteButton" value="Vote wizard"></input>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="overlayWindow">
+                <input type="button" id="overlayWindowCloseButton" value="X"></input>
+                <div id="overlayWindowContent">
+                    <div class="overlayNewVoteDiv">
+                        <div id="overlayNewVoteTitleDescModeDiv" class="overlayNewVoteColumn">
+                            <div id="overlayNewVoteTitleDescDiv">
+                                <h3>Neue Abstimmung</h3>
+                                <input type="text" id="overlayNewVoteTitleInput"></input><br/>
+                                <textarea rows="5" id="overlayNewVoteDescInput"></textarea>
+                            </div>
+
+                            <div id="overlayNewVoteModeDiv">
+                                <input type="radio" id="overlayNewVoteModeConsensus" name="mode" value="consensus" checked>
+                                <label for="overlayNewVoteModeConsensus">Konsensentscheidung</label><br/>
+                                <input type="radio" id="overlayNewVoteModeAbsMajority" name="mode" value="absMajority">
+                                <label for="overlayNewVoteModeAbsMajority">Abs. Mehrheit</label><br/>
+                                <input type="radio" id="overlayNewVoteModeRelMajority" name="mode" value="relMajority">
+                                <label for="overlayNewVoteModeRelMajority">Rel. Mehrheit</label>
+                            </div>
+                        </div>
+
+                        <div id="overlayNewVoteItemsDiv" class="overlayNewVoteColumn">
+                            <div id="overlayNewVoteItemsListDiv"></div>
+                            <div id="overlayNewVoteItemInputDiv">
+                                Neue Abstimmungsoption:
+                                <input type="text" id="overlayNewVoteItemInputDesc"></input>
+                                <input type="button" id="overlayNewVoteItemSubmit" value="Hinzufügen"></input>
+                            </div>
+                        </div>
+                        <input type="button" id="overlayNewVoteSubmit" value="Abstimmung erstellen"></input>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
