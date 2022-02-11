@@ -3,7 +3,7 @@
 
 Implementierung eines Matrix-Chatclient in JS, der experimentelle Tools zur Unterstützung (basis-)demokratischer Prozesse enthält.
 Geplant sind:
-* Automatische Redelisten
+
 * Abstimmungen
 * Untersuchung der Frage nach Rechte-/Rollenvergabe
 * Handzeichen
