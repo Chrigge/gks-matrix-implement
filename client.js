@@ -1,5 +1,3 @@
-// https://jsfiddle.net/gh/get/jquery/1.8.3/matrix-org/matrix.org/tree/master/jekyll/_posts/howtos/jsfiddles/create_room_send_msg
-
 // Global vars
 var roomID = "!HULaHFBnIxcwUEITua:gks-synapse";
 var domain = "http://localhost:8008/";
@@ -54,12 +52,31 @@ class Vote {
         this.id = id;
         this.mode = mode;
         if (id == "") {
-            var _id = title + desc + $.now() + generateRandomString();
+            var _id = $.now() + "-" + generateRandomString();
+            this.id = _id;
         }
         // Whether voting has finished or not.
         this.isFinished = false;
         // The object containing the result returned by this.getResult();
         this.result = null;
+    }
+
+    toJSON() {
+        var voteItemsJSON = []
+        for (var i = 0; i < this.voteItems.length; i++) {
+            voteItemsJSON.push(this.voteItems[i].toJSON());
+        }
+
+        var s = '{'
+            + '"title": "' + this.title
+            + '", "desc": "' + this.desc
+            + '", "id": "' + this.id
+            + '", "mode": "' + this.mode
+            + '", "voteItems": [' + voteItemsJSON + ']'
+            + ', "isFinished": ' + this.isFinished
+            + '}';
+        
+        return s;
     }
 
     constructHTML() {
@@ -87,12 +104,26 @@ class Vote {
          * @return the VoteItem that was found, or null if nothing was found.
          */
         for (var i = 0; i < this.voteItems.length; i++) {
-            var item = voteItems[i];
+            var item = this.voteItems[i];
             if (item.id == id) {
                 return item;
             }
         }
         return null;
+    }
+
+    getVotedItems() {
+        /**
+         * Returns an array of VoteItem that are selected/voted for by the user
+         * @return an array of VoteItem that are selected/voted for by the user
+         */
+        var list = [];
+        for (var i = 0; i < this.voteItems.length; i++) {
+            if (this.voteItems[i].isSelected) {
+                list.push(this.voteItems[i]);
+            }
+        }
+        return list;
     }
 
     getResult() {
@@ -110,7 +141,7 @@ class Vote {
         }
 
         var tally = [];
-        var maxVotedItem = voteItems[0];
+        var maxVotedItem = this.voteItems[0];
         // Get the tally for each voteItem and add a corresponding entry to the dict
         for (var i = 0; i < this.voteItems.length; i++) {
             var item = this.voteItems[i];
@@ -161,6 +192,10 @@ class VoteItem {
         this.isSelected = false
 
 
+    }
+
+    toJSON() {
+        return '{ "desc": "' + this.desc + '", "id": "' + this.id + '"}';
     }
 
     setIsSelected(isSelected) {
@@ -462,7 +497,7 @@ function switchScreen(screen) {
 function sendMessage(msg) {
     /**
      * Sends a chat message to the current chat room
-     * @param msg contains the message in the form { body: "Chat message" }
+     * @param msg contains the message in the form { msgtype: type, body: "Chat message" }
      */
 
     var msgID = $.now();
@@ -472,7 +507,7 @@ function sendMessage(msg) {
     url = url.replace("$roomid", encodeURIComponent(roomID));
 
     var msgData = JSON.stringify({
-        msgtype: "m.text",
+        msgtype: msg.msgtype,
         body: msg.body
     });
 
@@ -492,6 +527,89 @@ function sendMessage(msg) {
         }
     })
 }
+
+
+function sendNewVote(vote) {
+    /**
+     * Sends a message to all participants signalling that a new vote has started
+     * Should only be sent by moderators
+     * @TODO mod verification
+     * @param vote contains the vote to be sent.
+     */
+
+    var msg = {
+        msgtype: "m.newvote",
+        body: vote.toJSON()
+    };
+
+    sendMessage(msg);
+}
+
+function sendVoteFinished(voteID) {
+        /**
+     * Sends a message to all participants signalling that a vote has ended
+     * Should only be sent by moderators
+     * @TODO mod verification
+     * @param voteID contains the ID of the vote that finished.
+     */
+
+         var msg = {
+            msgtype: "m.votefinished",
+            body: '{ "voteID": "' + voteID + '"}'
+        };
+    
+        sendMessage(msg);
+}
+
+function sendVotedItem(votedItemID, voteID) {
+    /**
+ * Sends a message to all participants containing the ID of the items voted for.
+ * Should only be sent by moderators
+ * @TODO mod verification
+ * @param voteItemID contains the ID of the voteItem(s) that were chosen
+ * @param voteID contains the ID of the vote that finished.
+ */
+    var votedItemStr = "";
+    for (var i = 0; i < votedItemID.length; i++) {
+        votedItemStr += '"' + votedItemID[i] + '"';
+        if (i < votedItemID.length - 1) {
+            votedItemStr += ", "
+        }
+    }
+    var msg = {
+        msgtype: "m.voteditem",
+        body: '{'
+            + '"voteID": "'+ voteID + '",'
+            + '"votedItemID": [' + votedItemStr +  ']'   
+            + '}'
+    };
+
+    sendMessage(msg);
+}
+
+function sendSyncFinishedVote(vote) {
+    /**
+ * Sends a message to all participants signalling that a vote has ended
+ * Should only be sent by moderators
+ * This doesn't work if vote.result has not yet been determined (i.e. the vote hasn't finished)
+ * @TODO mod verification
+ * @param vote contains the vote to be synced.
+ * @param result contains the vote's result
+ * @return whether there was a result to be sent (but not whether the msg was sent successfully - see the log for infos about that).
+ */
+    if (vote.result == null || !vote.isFinished) {
+        return false;
+    }
+    
+    var msg = {
+        msgtype: "m.syncfinishedvote",
+        body: "{ vote: " + JSON.stringify(vote) + ", result: " + JSON.stringify(vote.result) + "}"
+    };
+
+    sendMessage(msg);
+    return true;
+}
+
 
 
 function longpollRoomEvents(since) {
@@ -545,10 +663,77 @@ function processReceivedEvents(data) {
     // Cycle through events and process them one-by-one
     for (var i = 0; i < events.length; i++) {
         var event = events[i];
-        switch (event.type) {
-            case "m.room.message":
-                var message = new ChatMessage(event.sender, event.content.body, event.origin_server_ts);
+        console.log(event.content.body);
+        var result = JSON.parse(event.content.body);
+        console.log(result);
+        // alert(event.content.msgtype);
+                
+        switch (event.content.msgtype) {
+            case "m.text":
+                var message = new ChatMessage(event.sender, result.text, event.origin_server_ts);
                 pushChatMessage(message);
+                break;
+            
+            case "m.newvote":
+                var vote = new Vote(result.title, result.desc, [], result.id, result.mode);
+                var voteItems = [];
+                for (var j = 0; j < result.voteItems.length; j++) {
+                    var item = new VoteItem(vote, result.voteItems[j].desc, result.voteItems[j].id);
+                    voteItems.push(item);
+                }
+                
+                vote.voteItems = voteItems;
+                currentVote = vote;
+                updateVoteHTML(currentVote);
+                break;
+            
+            case "m.votefinished":
+                if (currentVote == null) {
+                    // @TODO handle what happens here (re-request the current vote?)
+                    alert("Current vote is null!");
+                    break;
+                }
+                 
+                if (currentVote.id != result.voteID) {
+                    alert("Vote finished received, but got an unknown vote ID");
+                    console.log(currentVote.id + " =/= " + result.voteID);
+                    break;
+                }
+
+                // alert("Vote finished!" + result.voteID);
+                currentVote.finishVote();
+                break;
+            
+
+            case "m.voteditem":
+                // alert("wowoof");
+                var ids = result.votedItemID;
+                if (currentVote == null) {
+                    // @TODO handle what happens here (re-request the current vote?)
+                    alert("Current vote is null!");
+                    break;
+                }
+                 
+                if (currentVote.id != result.voteID) {
+                    alert("Vote item selection received, but got an unknown vote ID");
+                    console.log(currentVote.id + " =/= " + result.voteID);
+                    break;
+                }
+                
+                var l = 0;
+                for (var x = 0; x < currentVote.voteItems.length; x++) {
+                    var _item = currentVote.voteItems[x];
+                    for (var j = 0; j < ids.length; j++) {
+                        if (_item.id == ids[j]) {
+                            _item.votes += 1;
+                        }
+                    }
+                    // console.log(_item);
+                }
+                updateVoteHTML(currentVote);
+                break;
+            
+            default:
                 break;
         }
     }
@@ -573,8 +758,6 @@ function updateVoteHTML(vote) {
      * @param vote The current vote - should be currentVote.
      */
 
-    console.log(vote);
-
     // If there is no vote currently, empty the div and return
     if (vote == null) {
         $("#chatVoting").html("");
@@ -587,10 +770,7 @@ function updateVoteHTML(vote) {
     s += "<div class='voteDesc'>" + vote.desc + "</div>";
     $("#chatVoting").html(s);
 
-    // if (vote !== null) {
-    //     $("#chatVoting").append(vote.constructHTML());
-    // }
-    
+
     // Construct a div for each VoteItem and attach a click event handler, then append it to the div.
     // The div has an ID equal to the VoteItem instance's id-variable.
     for (var i = 0; i < vote.voteItems.length; i++) {
@@ -646,12 +826,6 @@ function generateRandomString(len=15, maxattempts=100) {
 
 $(document).ready(function() {
     
-    currentVote = new Vote("Sample Vote", "This is a sample vote. Weee!");
-    voteItems = [new VoteItem(currentVote, "Hello World!"), new VoteItem(currentVote, "Vote 2"), new VoteItem(currentVote, "Vote 3")];
-    currentVote.voteItems = voteItems;
-    voteItems[1].votes = 3;
-    voteItems[2].votes = 4;
-    console.log(currentVote.voteItems);
     voteWizardInit();
 
     switchScreen("login");
@@ -674,7 +848,9 @@ $(document).ready(function() {
 
 
     $("#sendMessageButton").click(function() {
-        var msg = { body: $("#messageTextInput").val() };
+        var msg = { 
+            msgtype: "m.text",
+            body: '{"text": "' + $("#messageTextInput").val() + '"}' };
         sendMessage(msg);
     });
 
@@ -690,16 +866,30 @@ $(document).ready(function() {
         tryJoinRoom($("#roomSelectInput").val());
     });
 
+    $("#sendVoteButton").click(function() {
+        if (currentVote.isFinished) {
+            return;
+        }
+        // Get voted items & send them
+        var itemList = currentVote.getVotedItems();
+        var itemIDList = [];
+        for (var i = 0; i < itemList.length; i++) {
+            itemIDList.push(itemList[i].id);
+        }
+        sendVotedItem(itemIDList, currentVote.id);
+    });
+
     $("#finishVoteButton").click(function() {
         if (currentVote == null) {
             return;
         }
         currentVote.finishVote();
+        sendVoteFinished(currentVote.id);
     });
 
     $("#newVoteButton").click(function() {
         voteWizardInit();
-    })
+    });
 
     $("#overlayWindowCloseButton").click(function() {
         switchOverlayWindow("");
@@ -715,5 +905,13 @@ $(document).ready(function() {
 
     $("#overlayNewVoteSubmit").click(function() {
         voteWizardFinalize();
+        sendNewVote(currentVote);
+    });
+
+
+
+    $("#debugButton").click(function() {
+        console.log("DEBUG:");
+        console.log(currentVote);
     });
 });
