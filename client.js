@@ -217,7 +217,6 @@ class Vote {
          */
         this.isFinished = true;
         this.result = this.getResult();
-        console.log(this.result);
         updateVoteHTML(currentVote);
     }
 }
@@ -354,7 +353,6 @@ function voteWizardFinalize() {
      */
     currentVote = voteInWizard;
     switchOverlayWindow("");
-    console.log(currentVote);
     // updateVoteHTML(currentVote);
     updateVoteHTML(voteInWizard);
 }
@@ -550,7 +548,6 @@ function switchScreen(screen) {
             // Synchronize timestamps with current time
             syncTimestamp = $.now();
             originalTimestamp = syncTimestamp;
-            console.log("Now: " + syncTimestamp);
             
             // Start chat polling event loop and send a user join- and meeting sync request.
             eventLoopActive = true;
@@ -593,8 +590,6 @@ function sendMessage(msg) {
         data: msgData,
         dataType: "json",
         success: function(responseData) {
-            // console.log("Sent message!");
-            // console.log(responseData);
         },
         error: function(errorData) {
             console.log("Sending failed");
@@ -652,9 +647,6 @@ function sendNewVote(vote) {
         msgtype: "m.newvote",
         body: '{"currentVote": ' + vote.toJSON() + '}'
     };
-
-    console.log("Vote created:");
-    console.log(vote);
 
     sendMessage(msg);
 }
@@ -781,8 +773,7 @@ function longpollRoomEvents(since, forward=true) {
     }
 
     $.getJSON(url, function(receivedData) {
-            // console.log("Retrieved data at " + $.now());
-            // console.log(receivedData);
+
             longpollFrom = receivedData.end;
 
             // Process the received data.
@@ -851,12 +842,11 @@ function processReceivedEvents(data) {
                     _user = userList[j];
                     if (_user.id == id) {
                         userList.splice(j, 1);
-                        console.log(j);
                     }
                 }
                 if (_user != null) {
                     console.log("User " + id + " left");
-                    console.log(userList);
+                    chatMessages.add(new ChatMessage("system", _user.name + " hat den Chat verlassen", $.now()))
                 }
                 else {
                     console.log("User that left wasn't in the user list");
@@ -879,8 +869,8 @@ function processReceivedEvents(data) {
                 }
                  
                 if (currentVote.id != result.voteID) {
-                    alert("Vote finished received, but got an unknown vote ID");
-                    console.log(currentVote.id + " =/= " + result.voteID);
+                    console.log("Vote finished received, but got an unknown vote ID");
+                    sendSyncMeetingRequest();
                     break;
                 }
 
@@ -900,8 +890,8 @@ function processReceivedEvents(data) {
                 }
                  
                 if (currentVote.id != result.voteID) {
-                    alert("Vote item selection received, but got an unknown vote ID");
-                    console.log(currentVote.id + " =/= " + result.voteID);
+                    console.log("Vote item selection received, but got an unknown vote ID");
+                    sendSyncMeetingRequest();
                     break;
                 }
                 
@@ -918,7 +908,6 @@ function processReceivedEvents(data) {
                             _item.votes.add(author);
                         }
                     }
-                    // console.log(_item);
                 }
                 updateVoteHTML(currentVote);
                 break;
@@ -952,10 +941,8 @@ function processReceivedEvents(data) {
                         newChatMessages.push(newMsg);
                     }
 
-                    console.log("user list");
                     for (var x = 0; x < result.userList.length; x++) {
                         var msg = JSON.parse(result.userList[x]);
-                        console.log(msg);
                         _user = new User(msg.name, msg.joined, msg.id);
                         newUserList.push(_user);
                     }
@@ -1121,21 +1108,15 @@ function getVoteFromMessage(msg) {
      * @param msg the body of the received message (unparsed json string)
      * @return the newly created vote
      */
-    console.log("raw vote msg:")
-    console.log(msg);
     if (msg == "{}" || msg == "" || msg == {} || msg == null) {
         return null;
     }
-    // if (!("currentVote" in msg)) {
-    //     return null;
-    // }
+    
     var parsedMsg = msg;//.currentVote;
     if ($.isEmptyObject(parsedMsg)) {
         return null;
     }
-    console.log("vote msg:");
-    console.log(parsedMsg);
-       
+    
     var vote = new Vote(parsedMsg.title, parsedMsg.desc, [], parsedMsg.id, parsedMsg.mode);
     var voteItems = [];
     
@@ -1160,6 +1141,7 @@ $(document).ready(function() {
 
     $("#overlayWindow").hide();
     $("#overlayNewVoteDiv").hide();
+    $("#debugButton").hide();
 
     $("#loginButton").click(function() {
         var user = $("#usernameInput").val();
@@ -1225,7 +1207,6 @@ $(document).ready(function() {
 
     $("#overlayNewVoteItemSubmit").click(function() {
         var desc = $("#overlayNewVoteItemInputDesc").val();
-        console.log(desc);
         var item = new VoteItem(voteInWizard, desc);
         voteInWizard.voteItems.push(item);
         voteWizardUpdate();
