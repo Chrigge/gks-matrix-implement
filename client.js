@@ -12,6 +12,7 @@ var userInfo = {}; // Contains user info/stats (e.g. user name)
 var eventLoopActive = true; // Whether to continue the event loop
 
 var chatMessages = [];
+var userList = [];
 
 var currentVote = null;
 var voteInWizard = null;
@@ -22,6 +23,45 @@ var pastRandomStrings = []; // Contains a list of previously generated strings f
 
 var syncTimestamp = Number.MAX_VALUE; // Contains the timestamp of the last accepted sync.
 var originalTimestamp = Number.MAX_VALUE; // Contains the timestamp of when the user entered the room.
+
+var myself = null; // User object representing the local user.
+
+class User {
+    constructor(name, joined=-1, id=-1) {
+        /**
+         * Represents a user in the room.
+         * There should also be an instance for the local user him-/herself.
+         * @param name Name of the user as given by the Matrix API
+         * @param joined Timestamp of when the user joined. Default to $.now().
+         * @param id Unique ID for this user. Defaults to a random ID.
+         */
+
+        if (id < 0) {
+            id = "u" + $.now() + "-" + generateRandomString(); // Unique ID to make name collisions possible
+        }
+
+        if (joined < 0) {
+            joined = $.now();
+        }
+
+        this.name = name;
+        this.joined = joined;
+        this.id = id;
+        
+    }
+
+    toString() {
+        return this.name;
+    }
+
+    toJSON() {
+        return '{'
+            + '"id": "' + this.id + '",'
+            + '"name": "' + this.name + '",'
+            + '"joined": "' + this.joined + '"'
+            + '}';
+    }
+}
 
 class ChatMessage {
     constructor(author, message, timestamp) {
@@ -344,8 +384,10 @@ function voteWizardUpdateHTML() {
 
 function tryLogin(user, pass) {
     /**
-     * Tries to login the user using the given credentials
+     * Tries to login the user using the given credentials.
+     * Also constructs the User object for the local user.
      */
+    myself = new User(user, $.now());
 
     var ajaxData = JSON.stringify({user: user, password: pass, type:"m.login.password"});
 
@@ -502,16 +544,17 @@ function switchScreen(screen) {
             break;
         
         case "chat":
+            // Switch to chat screen
+            $("#chatScreen").toggle();
+
             // Synchronize timestamps with current time
             syncTimestamp = $.now();
             originalTimestamp = syncTimestamp;
             console.log("Now: " + syncTimestamp);
-
-            // Switch to chat screen
-            $("#chatScreen").toggle();
-
-            // Start chat polling event loop and send a meeting sync request.
+            
+            // Start chat polling event loop and send a user join- and meeting sync request.
             eventLoopActive = true;
+            sendUserEnter(myself);
             sendSyncMeetingRequest();
             longpollRoomEvents(0, true);
 
@@ -558,6 +601,42 @@ function sendMessage(msg) {
             console.log(errorData);
         }
     })
+}
+
+
+function sendUserEnter(user) {
+    /**
+     * Sends a message that signals that a user has entered the chat.
+     * Usually, the client entering sends this with his/her self-representating User object.
+     * @param user the User object of the client that entered the chat.
+     */
+
+    var msg = {
+        msgtype: 'm.userenter',
+        body: '{ "user": ' + user.toJSON() + '}'
+    }
+
+    sendMessage(msg);
+}
+
+function sendUserLeave() {
+    /**
+     * Sends a message that signals that this client has left the chat.
+     * Usually, the client entering sends this with his/her self-representating User object.
+     * @TODO this is super unsafe - by sending a custom message, people may kick other people out.
+     * @param user the User object of the client that entered the chat.
+     */
+
+    if (myself == null) {
+        return;
+    }
+
+    var msg = {
+        msgtype: 'm.userleave',
+        body: '{ "user": ' + myself.toJSON() + '}'
+    }
+
+    sendMessage(msg);
 }
 
 
@@ -729,6 +808,10 @@ function longpollRoomEvents(since, forward=true) {
 
 
 function processReceivedEvents(data) {
+    /**
+     * Processes events (i.e. messages) sent by other clients and acts accordingly.
+     * @param data the original message received.
+     */
     
     // Cancel if no new events were received in the data
     if (!('rooms' in data)) {
@@ -752,6 +835,35 @@ function processReceivedEvents(data) {
                 var message = new ChatMessage(event.sender, result.text, event.origin_server_ts);
                 pushChatMessage(message);
                 break;
+
+
+            case "m.userenter":
+                var userData = result.user;
+                var user = new User(userData.name, userData.joined, userData.id);
+                userList.push(user);
+                updateUserListHTML();
+                break;
+            
+            case "m.userleave":
+                var id = result.user.id;
+                var _user = null;
+                for (var j = 0; j < userList.length; j++) {
+                    _user = userList[j];
+                    if (_user.id == id) {
+                        userList.splice(j, 1);
+                        console.log(j);
+                    }
+                }
+                if (_user != null) {
+                    console.log("User " + id + " left");
+                    console.log(userList);
+                }
+                else {
+                    console.log("User that left wasn't in the user list");
+                }
+                updateUserListHTML();
+                break;
+
             
             case "m.newvote":
                 var vote = getVoteFromMessage(result.currentVote);
@@ -759,6 +871,7 @@ function processReceivedEvents(data) {
                 updateVoteHTML(currentVote);
                 break;
             
+
             case "m.votefinished":
                 if (currentVote == null) {
                     // @TODO handle what happens here (re-request the current vote?)
@@ -830,17 +943,29 @@ function processReceivedEvents(data) {
                 // Sync the meeting if the received msg's timestamp is older than our own.
                 if (result.timestamp < syncTimestamp) {
                     console.log("Starting sync...");
-                    currentVote = getVoteFromMessage(JSON.parse(result.currentVote));
                     var newChatMessages = [];
+                    var newUserList = [];
+
                     for (var x = 0; x < result.chatMessages.length; x++) {
                         var msg = JSON.parse(result.chatMessages[i]);
-                        console.log(msg);
                         newMsg = new ChatMessage(msg.author, msg.message, msg.timestamp);
                         newChatMessages.push(newMsg);
                     }
+
+                    console.log("user list");
+                    for (var x = 0; x < result.userList.length; x++) {
+                        var msg = JSON.parse(result.userList[x]);
+                        console.log(msg);
+                        _user = new User(msg.name, msg.joined, msg.id);
+                        newUserList.push(_user);
+                    }
+
+                    currentVote = getVoteFromMessage(JSON.parse(result.currentVote));
+                    userList = newUserList;
                     chatMessages = newChatMessages;
                     syncTimestamp = result.timestamp;
                     updateChatMessagesHTML();
+                    updateUserListHTML();
                 }
                 break;
             
@@ -856,13 +981,30 @@ function pushChatMessage(message) {
    
 }
 
+
+function updateUserListHTML() {
+    /**
+     * Updates the HTML of the user list.
+     */
+    var str = "";
+    for (var i = 0; i < userList.length; i++) {
+        str += userList[i].toString() + "<br/>";
+    }
+    $("#chatUsers").html(str);
+}
+
+
+
 function updateChatMessagesHTML() {
-     // Construct string of text messages and update the chatMessages-<p> with it
-     var str = "";
-     for (var i = 0; i < chatMessages.length; i++) {
-         str += chatMessages[i].toString() + "<br/>";
-     }
-     $("#chatMessages").html(str);
+    /**
+     * Updates the HTML chat message box.
+     */ 
+    
+    var str = "";
+    for (var i = 0; i < chatMessages.length; i++) {
+        str += chatMessages[i].toString() + "<br/>";
+    }
+    $("#chatMessages").html(str);
  
 }
 
@@ -917,17 +1059,21 @@ function updateVoteHTML(vote) {
 function getMeetingStateJSON() {
     /**
      * Returns the state of the room as JSON for syncing purposes (i.e. m.syncmeeting).
+     * @return object containing the state of the room
      */
-
-
 
     var timestamp = syncTimestamp;
     var chatMessagesJSON = [];
+    var userListJSON = [];
     var currentVoteJSON = "{}";
     
     for (var i = 0; i < chatMessages.length; i++) {
         var _chatmsg = chatMessages[i];
         chatMessagesJSON.push(_chatmsg.toJSON());
+    }
+    for (var i = 0; i < userList.length; i++) {
+        var _user = userList[i];
+        userListJSON.push(_user.toJSON());
     }
     if (currentVote != null) {
         currentVoteJSON = currentVote.toJSON();
@@ -936,7 +1082,8 @@ function getMeetingStateJSON() {
     var json = {
         timestamp: timestamp,
         currentVote: currentVoteJSON,
-        chatMessages: chatMessagesJSON
+        chatMessages: chatMessagesJSON,
+        userList: userListJSON
     };
 
     return json;
@@ -1004,6 +1151,7 @@ function getVoteFromMessage(msg) {
 
 
 $(document).ready(function() {
+    
     
     voteWizardInit();
 
@@ -1092,6 +1240,12 @@ $(document).ready(function() {
 
     $("#debugButton").click(function() {
         console.log("DEBUG:");
-        console.log(currentVote);
+        sendUserLeave();
+    });
+
+
+
+    $(window).on("beforeunload", function() { 
+        sendUserLeave();
     });
 });
