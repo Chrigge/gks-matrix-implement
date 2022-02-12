@@ -16,7 +16,12 @@ var chatMessages = [];
 var currentVote = null;
 var voteInWizard = null;
 
+var meetingHasStarted = false;
+
 var pastRandomStrings = []; // Contains a list of previously generated strings for the generateRandomString()
+
+var syncTimestamp = Number.MAX_VALUE; // Contains the timestamp of the last accepted sync.
+var originalTimestamp = Number.MAX_VALUE; // Contains the timestamp of when the user entered the room.
 
 class ChatMessage {
     constructor(author, message, timestamp) {
@@ -33,6 +38,14 @@ class ChatMessage {
 
     toString() {
         return "(" + this.timestamp + ") " + this.author + ": " + this.message;
+    }
+
+    toJSON() {
+        return '{'
+            + '"author": "' + this.author + '",'
+            + '"message": "'+ this.message + '",'
+            + '"timestamp": "' + this.timestamp + '"'
+            + '}';
     }
 }
 
@@ -147,7 +160,7 @@ class Vote {
             var item = this.voteItems[i];
             var entry = {item: item.votes};
             tally.push(entry);
-            if (item.votes > maxVotedItem.votes) {
+            if (item.votes.size > maxVotedItem.votes,size) {
                 maxVotedItem = item;
             }
         }
@@ -179,7 +192,7 @@ class VoteItem {
          */
         this.vote = vote;
         this.desc = desc;
-        this.votes = 0;
+        this.votes = new Set();
         this.id = id;
         if (id == "") {
             var _id = vote.id + $.now() + "-" + generateRandomString();
@@ -195,7 +208,18 @@ class VoteItem {
     }
 
     toJSON() {
-        return '{ "desc": "' + this.desc + '", "id": "' + this.id + '"}';
+        var votesStr = "";
+        var votesArr = Array.from(this.votes);
+        for (var i = 0; i < votesArr.length; i++) {
+            votesStr += votesArr[i];
+            if (i < votesArr.length - 1) {
+                votesStr += ", ";
+            }
+        }
+        return '{ "desc": "' + this.desc
+         + '", "id": "' + this.id
+         + '", "votes": [' + votesStr
+         + ']}';
     }
 
     setIsSelected(isSelected) {
@@ -245,7 +269,7 @@ class VoteItem {
             }
         }
         var s = "";
-        s += "<div class='voteItem " + layoutClass + "' id='" + this.id + "'>" + this.desc + "<br/>Votes: " + this.votes + "</div>";
+        s += "<div class='voteItem " + layoutClass + "' id='" + this.id + "'>" + this.desc + "<br/>Votes: " + this.votes.size + "</div>";
         return s;
     }
 }
@@ -478,11 +502,19 @@ function switchScreen(screen) {
             break;
         
         case "chat":
+            // Synchronize timestamps with current time
+            syncTimestamp = $.now();
+            originalTimestamp = syncTimestamp;
+            console.log("Now: " + syncTimestamp);
+
+            // Switch to chat screen
             $("#chatScreen").toggle();
-            // Start chat polling event loop
+
+            // Start chat polling event loop and send a meeting sync request.
             eventLoopActive = true;
-            // pullRoomData();
-            longpollRoomEvents(0);
+            sendSyncMeetingRequest();
+            longpollRoomEvents(0, true);
+
             // Update the shown vote's HTML.
             updateVoteHTML(currentVote);
             break;
@@ -539,7 +571,40 @@ function sendNewVote(vote) {
 
     var msg = {
         msgtype: "m.newvote",
-        body: vote.toJSON()
+        body: '{"currentVote": ' + vote.toJSON() + '}'
+    };
+
+    console.log("Vote created:");
+    console.log(vote);
+
+    sendMessage(msg);
+}
+
+function sendSyncMeetingRequest() {
+    /**
+     * Sends a sync request to all participants. This is called when you enter the room.
+     */
+    var msg = {
+        msgtype: "m.syncmeetingrequest",
+        body: '{ "timestamp": ' + syncTimestamp + '}'
+    };
+
+    sendMessage(msg);
+}
+
+function sendSyncMeeting() {
+    /**
+     * Sends a message containing all known infos in the room.
+     * The receiver should pick the client that has been a member of the room the longest
+     *  as its information source. However, every client answers independently with this
+     *  when a m.syncmeetingrequest is received.
+     */
+
+    var meetingStateJSON = JSON.stringify(getMeetingStateJSON());
+    
+    var msg = {
+        msgtype: "m.syncmeeting",
+        body: meetingStateJSON
     };
 
     sendMessage(msg);
@@ -612,7 +677,7 @@ function sendSyncFinishedVote(vote) {
 
 
 
-function longpollRoomEvents(since) {
+function longpollRoomEvents(since, forward=true) {
     /**
      * Polls the API for new room events, such as messages etc.
      * This acts as a long poll loop: A request is sent to the server,
@@ -621,6 +686,7 @@ function longpollRoomEvents(since) {
      * i.e. sends a new message to the server.
      * @param since lets the server know the time from which to send new events.
      *              This should be 0(?) on initial sync.
+     * @param forward If true, polling will get the next message blocks. If false, it will get the previous ones (recursively until it hits a m.startmeeting).
      */
     var timeout = 5000; // 5 seconds till timeout (i.e. when the server is forced to respond)
 
@@ -640,11 +706,24 @@ function longpollRoomEvents(since) {
             // console.log(receivedData);
             longpollFrom = receivedData.end;
 
-            // Process the received data
-            processReceivedEvents(receivedData);
+            // Process the received data.
+            // Only do this if since is not zero, i.e. this is not the initial sync -
+            //  we want to do syncing on our own since we have more to sync and
+            //  old messages may be untrustworthy.
+            //  Also, broken message formatting may mess with the client,
+            //  so it's important to be able to reset everything in the worst case (as a fail-safe).
+            //  (@TODO This is bad, but catching every bad format would be a lot of work)
+            if (since != 0) {
+                processReceivedEvents(receivedData);
+            }
 
             // Call this function recursively
-            longpollRoomEvents(receivedData.next_batch);
+            if (forward) {
+                longpollRoomEvents(receivedData.next_batch, forward);
+            }
+            else if (!meetingHasStarted) {
+                longpollRoomEvents(receivedData.prev_batch, forward);
+            }
         });
 }
 
@@ -658,16 +737,16 @@ function processReceivedEvents(data) {
 
     // Events seem to be stored in data.rooms.join[roomID].timeline.events, so simplify
     var events = data.rooms.join[roomID].timeline.events;
+    console.log("Received msg:");
     console.log(events);
 
     // Cycle through events and process them one-by-one
     for (var i = 0; i < events.length; i++) {
         var event = events[i];
-        console.log(event.content.body);
         var result = JSON.parse(event.content.body);
         console.log(result);
-        // alert(event.content.msgtype);
-                
+     
+        
         switch (event.content.msgtype) {
             case "m.text":
                 var message = new ChatMessage(event.sender, result.text, event.origin_server_ts);
@@ -675,14 +754,7 @@ function processReceivedEvents(data) {
                 break;
             
             case "m.newvote":
-                var vote = new Vote(result.title, result.desc, [], result.id, result.mode);
-                var voteItems = [];
-                for (var j = 0; j < result.voteItems.length; j++) {
-                    var item = new VoteItem(vote, result.voteItems[j].desc, result.voteItems[j].id);
-                    voteItems.push(item);
-                }
-                
-                vote.voteItems = voteItems;
+                var vote = getVoteFromMessage(result.currentVote);
                 currentVote = vote;
                 updateVoteHTML(currentVote);
                 break;
@@ -690,7 +762,6 @@ function processReceivedEvents(data) {
             case "m.votefinished":
                 if (currentVote == null) {
                     // @TODO handle what happens here (re-request the current vote?)
-                    alert("Current vote is null!");
                     break;
                 }
                  
@@ -708,6 +779,7 @@ function processReceivedEvents(data) {
             case "m.voteditem":
                 // alert("wowoof");
                 var ids = result.votedItemID;
+                var author = event.sender;
                 if (currentVote == null) {
                     // @TODO handle what happens here (re-request the current vote?)
                     alert("Current vote is null!");
@@ -723,14 +795,53 @@ function processReceivedEvents(data) {
                 var l = 0;
                 for (var x = 0; x < currentVote.voteItems.length; x++) {
                     var _item = currentVote.voteItems[x];
+                    // Check if the author is already in a voteItem's votes and if so, remove him*her from the voteItem's set
+                    if (_item.votes.has(author)) {
+                        _item.votes.delete(author);
+                    }
+                    // Add author to corresponding voteItem's votes
                     for (var j = 0; j < ids.length; j++) {
                         if (_item.id == ids[j]) {
-                            _item.votes += 1;
+                            _item.votes.add(author);
                         }
                     }
                     // console.log(_item);
                 }
                 updateVoteHTML(currentVote);
+                break;
+            
+            case "m.startmeeting":
+                meetingHasStarted = true;
+                break;
+
+
+            case "m.syncmeetingrequest":
+                if (result.timestamp > syncTimestamp) {
+                    sendSyncMeeting();
+                    console.log("Sent sync!");
+                    
+                }
+                else {
+                    console.log("Did not accept sync - request was ours or older than we are...");
+                }
+                break;
+            
+            case "m.syncmeeting":
+                // Sync the meeting if the received msg's timestamp is older than our own.
+                if (result.timestamp < syncTimestamp) {
+                    console.log("Starting sync...");
+                    currentVote = getVoteFromMessage(JSON.parse(result.currentVote));
+                    var newChatMessages = [];
+                    for (var x = 0; x < result.chatMessages.length; x++) {
+                        var msg = JSON.parse(result.chatMessages[i]);
+                        console.log(msg);
+                        newMsg = new ChatMessage(msg.author, msg.message, msg.timestamp);
+                        newChatMessages.push(newMsg);
+                    }
+                    chatMessages = newChatMessages;
+                    syncTimestamp = result.timestamp;
+                    updateChatMessagesHTML();
+                }
                 break;
             
             default:
@@ -741,14 +852,18 @@ function processReceivedEvents(data) {
 
 function pushChatMessage(message) {
     chatMessages.push(message);
+    updateChatMessagesHTML();
+   
+}
 
-    // Construct string of text messages and update the chatMessages-<p> with it
-    var str = "";
-    for (var i = 0; i < chatMessages.length; i++) {
-        str += chatMessages[i].toString() + "<br/>";
-    }
-    $("#chatMessages").html(str);
-
+function updateChatMessagesHTML() {
+     // Construct string of text messages and update the chatMessages-<p> with it
+     var str = "";
+     for (var i = 0; i < chatMessages.length; i++) {
+         str += chatMessages[i].toString() + "<br/>";
+     }
+     $("#chatMessages").html(str);
+ 
 }
 
 
@@ -799,6 +914,35 @@ function updateVoteHTML(vote) {
 }
 
 
+function getMeetingStateJSON() {
+    /**
+     * Returns the state of the room as JSON for syncing purposes (i.e. m.syncmeeting).
+     */
+
+
+
+    var timestamp = syncTimestamp;
+    var chatMessagesJSON = [];
+    var currentVoteJSON = "{}";
+    
+    for (var i = 0; i < chatMessages.length; i++) {
+        var _chatmsg = chatMessages[i];
+        chatMessagesJSON.push(_chatmsg.toJSON());
+    }
+    if (currentVote != null) {
+        currentVoteJSON = currentVote.toJSON();
+    }
+    
+    var json = {
+        timestamp: timestamp,
+        currentVote: currentVoteJSON,
+        chatMessages: chatMessagesJSON
+    };
+
+    return json;
+}
+
+
 function generateRandomString(len=15, maxattempts=100) {
     /**
      * Constructs a random string which can be used as ID (if len is high enough).
@@ -824,11 +968,47 @@ function generateRandomString(len=15, maxattempts=100) {
 }
 
 
+function getVoteFromMessage(msg) {
+    /**
+     * Creates a new Vote instance from a received message's (parsed) body.
+     * @param msg the body of the received message (unparsed json string)
+     * @return the newly created vote
+     */
+    console.log("raw vote msg:")
+    console.log(msg);
+    if (msg == "{}" || msg == "" || msg == {} || msg == null) {
+        return null;
+    }
+    // if (!("currentVote" in msg)) {
+    //     return null;
+    // }
+    var parsedMsg = msg;//.currentVote;
+    if ($.isEmptyObject(parsedMsg)) {
+        return null;
+    }
+    console.log("vote msg:");
+    console.log(parsedMsg);
+       
+    var vote = new Vote(parsedMsg.title, parsedMsg.desc, [], parsedMsg.id, parsedMsg.mode);
+    var voteItems = [];
+    
+    for (var j = 0; j < parsedMsg.voteItems.length; j++) {
+        var item = new VoteItem(vote, parsedMsg.voteItems[j].desc, parsedMsg.voteItems[j].id);
+        item.votes = new Set(parsedMsg.voteItems[j].votes);
+        voteItems.push(item);
+    }
+    
+    vote.voteItems = voteItems;
+    return vote;
+}
+
+
 $(document).ready(function() {
     
     voteWizardInit();
 
     switchScreen("login");
+
 
     $("#overlayWindow").hide();
     $("#overlayNewVoteDiv").hide();
