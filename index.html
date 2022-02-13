@@ -88,6 +88,7 @@
                             <input type="button" id="modVoteButton" value="Vote new mod"></input>
                             <input type="button" id="modRemoveButton" value="Vote remove mod"></input>
                             <input type="button" id="votingModeVoteButton" value="Vote mode change"></input>
+                            <input type="button" id="startDecisionProcessButton" value="Start decision process"></input>
                         </div>
                     </div>
                 </div>
@@ -95,7 +96,12 @@
             <div id="overlayWindow">
                 <input type="button" id="overlayWindowCloseButton" value="X"></input>
                 <div id="overlayWindowContent">
-                    <div class="overlayNewVoteDiv">
+                    <div id="overlayWaitForMeetingDiv">
+                        Das Meeting startet, sobald alle anwesend Teilnehmer*Innen bereit sind und angegeben haben, dass alle potentiellen Teilnehmer*Innen da sind.
+                        <div id="overlayNumberOfUsersReady"></div><br/>
+                        <input type="button" id="overlayWaitForMeetingReadyButton" value="Ich bin bereit"></input>
+                    </div>
+                    <div id="overlayNewVoteDiv">
                         <div id="overlayNewVoteTitleDescModeDiv" class="overlayNewVoteColumn">
                             <div id="overlayNewVoteTitleDescDiv">
                                 <h3>Neue Abstimmung</h3>

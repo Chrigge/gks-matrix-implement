@@ -13,13 +13,14 @@ var eventLoopActive = true; // Whether to continue the event loop
 
 var chatMessages = [];
 var userList = [];
+var usersReadyForMeeting = [];
 
 var currentVote = null;
 var voteInWizard = null;
 var globalVotingMode = null;
 
 var meetingHasStarted = false;
-var meetingPhase = 0;
+var meetingPhase = "";
 
 var pastRandomStrings = []; // Contains a list of previously generated strings for the generateRandomString()
 
@@ -27,6 +28,7 @@ var syncTimestamp = Number.MAX_VALUE; // Contains the timestamp of the last acce
 var originalTimestamp = Number.MAX_VALUE; // Contains the timestamp of when the user entered the room.
 
 var myself = null; // User object representing the local user.
+
 
 class User {
     constructor(name, joined=-1, id=-1, role="normal") {
@@ -285,11 +287,17 @@ class Vote {
                 break;
             
             case "voteMod":
+                // Promote new mod
                 let newMod = getUserByUserID(this.result.result.values.userID);
                 if (newMod != null) {
                     newMod.role = "mod";
-
                 }
+                // If this was a mod vote phase-vote, advance the meeting phase and tell other clients.
+                if (meetingPhase == "chooseMods") {
+                    sendMeetingDiscussionPhase();
+                    
+                }
+
                 updateUserListHTML();
                 console.log("made " + newMod.name + " a mod!");
                 break;
@@ -306,6 +314,11 @@ class Vote {
             case "votingMode":
                 globalVotingMode = JSON.parse(this.result.result.values).mode;
                 console.log(globalVotingMode);
+
+                // If this was a voting mode vote, advance the meeting phase and tell other clients.
+                if (meetingPhase == "chooseVotingFormat") {
+                    sendModVotingPhase();
+                }
                 break;
         }
         
@@ -409,11 +422,21 @@ class VoteItem {
 }
 
 function switchOverlayWindow(windowType) {
-    
+    $("#overlayWaitForMeetingDiv").hide();
+    $("#overlayNewVoteDiv").hide();
+    $("#overlayWindowCloseButton").hide();
+
     switch(windowType) {
         case "voteWizard":
-            $("#overlayNewVoteDiv").show();
             $("#overlayWindow").show();
+            $("#overlayNewVoteDiv").show();
+            $("#overlayWindowCloseButton").show();
+            break;
+        
+        case "waitForMeetingStart":
+            $("#overlayWindow").show();
+            $("#overlayNewVoteDiv").hide();
+            $("#overlayWaitForMeetingDiv").show();
             break;
 
         default:
@@ -480,6 +503,7 @@ function tryLogin(user, pass) {
      * Also constructs the User object for the local user.
      */
     myself = new User(user, $.now());
+    // userList.push(myself);
 
     var ajaxData = JSON.stringify({user: user, password: pass, type:"m.login.password"});
 
@@ -645,6 +669,9 @@ function switchScreen(screen) {
             
             // Start chat polling event loop and send a user join- and meeting sync request.
             eventLoopActive = true;
+            if (meetingPhase == "") {
+                goToNextMeetingPhase();
+            }
             sendUserEnter(myself);
             sendSyncMeetingRequest();
             longpollRoomEvents(0, true);
@@ -724,6 +751,72 @@ function sendUserLeave() {
         msgtype: 'm.userleave',
         body: '{ "user": ' + myself.toJSON() + '}'
     }
+
+    sendMessage(msg);
+}
+
+function sendReadyForMeeting() {
+    /**
+     * Sends a message to all participants signalling that this client is ready for the meeting.
+     */
+    var msg = {
+        msgtype: 'm.readyformeeting',
+        body: '{ "user": ' + myself.toJSON() + '}'
+    }
+
+    sendMessage(msg);
+}
+
+
+function sendMeetingStart() {
+    /**
+     * Sends a notice that tells everyone to start the meeting.
+     * Clients will only take the message of the "oldest" client in the meeting list
+     *  and start a vote in that case (i.e. advance the meeting phase).
+     */
+        var msg = {
+        msgtype: "m.meetingstart",
+        body: '{ "user": ' + myself.toJSON() + '}'
+    };
+
+    sendMessage(msg);
+}
+
+function sendModVotingPhase() { 
+   /**
+    * Sends a notice to all clients that the mod voting phase has been entered.
+    * This happens after the voting mode vote phase. Only takes the message of the "oldest" client.
+    */
+    var msg = {
+       msgtype: "m.choosemodsphase",
+       body: '{ "user": ' + myself.toJSON() + '}'
+   };
+
+   sendMessage(msg);
+}
+
+function sendMeetingDiscussionPhase() {
+    /**
+     * Sends a notice to all clients that the main discussion phase has been entered.
+     * This happens after the mod voting phase. Only takes the message of the "oldest" client.
+     */
+     var msg = {
+        msgtype: "m.meetingdiscussionphase",
+        body: '{ "timestamp": ' + syncTimestamp + '}'
+    };
+
+    sendMessage(msg);
+}
+
+function sendStartDecisionProcess() {
+    /**
+     * Sends a notice to all clients that the main discussion phase has been entered.
+     * This happens when a mod presses the correspondin button.
+     */
+     var msg = {
+        msgtype: "m.startdecisionprocess",
+        body: '{ "timestamp": ' + syncTimestamp + '}'
+    };
 
     sendMessage(msg);
 }
@@ -869,7 +962,7 @@ function longpollRoomEvents(since, forward=true) {
      * i.e. sends a new message to the server.
      * @param since lets the server know the time from which to send new events.
      *              This should be 0(?) on initial sync.
-     * @param forward If true, polling will get the next message blocks. If false, it will get the previous ones (recursively until it hits a m.startmeeting).
+     * @param forward If true, polling will get the next message blocks. If false, it will get the previous ones (recursively until it hits a m.meetingstart).
      */
     var timeout = 5000; // 5 seconds till timeout (i.e. when the server is forced to respond)
 
@@ -934,22 +1027,25 @@ function processReceivedEvents(data) {
      
         
         switch (event.content.msgtype) {
-            case "m.text":
+            case "m.text": {
                 var message = new ChatMessage(event.sender, result.text, event.origin_server_ts);
                 pushChatMessage(message);
                 break;
+            }
 
 
-            case "m.userenter":
+            case "m.userenter": {
                 var userData = result.user;
-                var user = new User(userData.name, userData.joined, userData.id, userData.role);
+                let user = new User(userData.name, userData.joined, userData.id, userData.role);
                 userList.push(user);
                 updateUserListHTML();
+                updateWaitForMeetingStartWindowHTML();
                 break;
+            }
             
-            case "m.userleave":
-                var id = result.user.id;
-                var _user = null;
+            case "m.userleave": {
+                let id = result.user.id;
+                let _user = null;
                 for (let j = 0; j < userList.length; j++) {
                     _user = userList[j];
                     if (_user.id == id) {
@@ -964,11 +1060,93 @@ function processReceivedEvents(data) {
                     console.log("User that left wasn't in the user list");
                 }
                 updateUserListHTML();
+                updateWaitForMeetingStartWindowHTML();
                 break;
+            }
+            
+            
+            case "m.readyformeeting": {
+                for (let i = 0; i < usersReadyForMeeting.length; i++) {
+                    if (usersReadyForMeeting.id == result.userID) {
+                        break;
+                    }
+                }
+                let _user = new User(result.name, result.joined, result.id, result.role);
+                usersReadyForMeeting.push(_user);
+                updateWaitForMeetingStartWindowHTML();
+                break;
+            }
+
+
+            case "m.meetingstart": {
+                // There are multiple message event cases with the same structure (or exact same code).
+                // The reason for repeating is for easier maintenance, since other events may require
+                //  other code details later on.
+                // @TODO concatenate these functions?
+                let oldestUser = null;
+                for(let i = 0; i < userList.length; i++) {
+                    if (result.user.joined < myself.joined) {
+                        oldestUser = getUserByUserID(result.user.id);
+                    }
+                }
+                // Only send a start meeting-request if the message is sent by the oldest user in your meeting list (@TODO this is pretty bad - unsynced user lists may lead to a client not advancing its phase before syncing)
+                if (oldestUser.id != result.user.id) {
+                    break;
+                }
+                
+                goToNextMeetingPhase();
+                break;
+            }
+
+            case "m.choosevotingformat": {
+                let oldestUser = null;
+                for(let i = 0; i < userList.length; i++) {
+                    if (result.user.joined < myself.joined) {
+                        oldestUser = getUserByUserID(result.user.id);
+                    }
+                }
+                // Only send a start meeting-request if the message is sent by the oldest user in your meeting list (@TODO this is pretty bad - unsynced user lists may lead to a client not advancing its phase before syncing)
+                if (oldestUser.id != result.user.id) {
+                    break;
+                }
+                
+                goToNextMeetingPhase();
+                break;
+            }
+
+                
+            case "m.choosemodsphase": {
+                let oldestUser = myself;
+                for(let i = 0; i < userList.length; i++) {
+                    if (result.user.joined < myself.joined) {
+                        oldestUser = getUserByUserID(result.user.id);
+                    }
+                }
+                // Only send a start meeting-request if the message is sent by the oldest user in your meeting list (@TODO this is pretty bad - unsynced user lists may lead to a client not advancing its phase before syncing)
+                if (oldestUser.id != result.user.id) {
+                    break;
+                }
+                
+                goToNextMeetingPhase();
+                break;
+            }
+
+            case "m.meetingdiscussionphase": {
+                goToNextMeetingPhase();
+                break;
+            }
+
+            case "m.startdecisionprocess": {
+                goToNextMeetingPhase();
+                alert("Start dec prco");
+                break;
+            }
+
+            
             
 
-            case "m.changeuserrole":
-                var _user = null;
+            case "m.changeuserrole": {
+                let _user = null;
                 for (let i = 0; i < userList.length; i++) {
                     _user = userList[i];
                     if (_user.id == result.userID) {
@@ -981,9 +1159,10 @@ function processReceivedEvents(data) {
                 updateChatMessagesHTML();
                 updateUserListHTML();
                 break;
+            }
 
             
-            case "m.newvote":
+            case "m.newvote": {
                 var vote = getVoteFromMessage(result.currentVote);
                 
                 if (getUserByUserID(result.origin).role == "mod" || vote.effectType == "voteMod" 
@@ -1000,9 +1179,10 @@ function processReceivedEvents(data) {
                 }
                 updateVoteHTML(currentVote);
                 break;
+            }
             
 
-            case "m.votefinished":
+            case "m.votefinished": {
                 if (currentVote == null) {
                     // @TODO handle what happens here (re-request the current vote?)
                     break;
@@ -1017,9 +1197,10 @@ function processReceivedEvents(data) {
                 // alert("Vote finished!" + result.voteID);
                 currentVote.finishVote();
                 break;
+            }
             
 
-            case "m.voteditem":
+            case "m.voteditem": {
                 // alert("wowoof");
                 var ids = result.votedItemID;
                 var author = event.sender;
@@ -1051,13 +1232,10 @@ function processReceivedEvents(data) {
                 }
                 updateVoteHTML(currentVote);
                 break;
-            
-            case "m.startmeeting":
-                meetingHasStarted = true;
-                break;
+            }
 
 
-            case "m.syncmeetingrequest":
+            case "m.syncmeetingrequest": {
                 if (result.timestamp > syncTimestamp) {
                     sendSyncMeeting();
                     console.log("Sent sync!");
@@ -1067,8 +1245,10 @@ function processReceivedEvents(data) {
                     console.log("Did not accept sync - request was ours or older than we are...");
                 }
                 break;
-            
-            case "m.syncmeeting":
+            }
+
+
+            case "m.syncmeeting": {
                 // Sync the meeting if the received msg's timestamp is older than our own.
                 if (result.timestamp < syncTimestamp) {
                     console.log("Starting sync...");
@@ -1094,14 +1274,71 @@ function processReceivedEvents(data) {
                     meetingPhase = result.meetingPhase;
                     updateChatMessagesHTML();
                     updateUserListHTML();
+                    updateWaitForMeetingStartWindowHTML();
                 }
                 break;
+            }
             
-            default:
+            default: {
                 break;
+            }
         }
     }
 }
+
+
+
+function goToNextMeetingPhase() {
+    /**
+     * This changes the meeting phase and does everything associated with the change.
+     * Phases and effects:
+     * - "": Initial phase, this function should be called as soon as possible.
+     * - "waitForMeetingToStart": Waits until all users hit the "start meeting"-button.
+     * - "chooseVotingFormat": Creates a votingModeVote and waits for it to finish.
+     * - "chooseMods": Creates a modVote and waits for it to finish.
+     * - "mainDiscussion": Waits until a mod starts a decision process.
+     * - "decisionProcessDiscussion": Starts the decision process and waits until a mod creates a vote via vote wizard.
+     * - "decisionProcessVote": Waits until the associated vote is over.
+     * - "endMeeting": Ends the meeting.
+     */
+
+    // This switch statement takes the current meetingPhase as conditional and expects its cases to advance the phase on their own.
+    // That means that each case has to do the things necessary for the start of the respective "next" phase.
+    switch (meetingPhase) {
+        case "":
+            meetingPhase = "waitForMeetingToStart";
+            initWaitForMeetingStartWindow();
+            break;
+
+        case "waitForMeetingToStart":
+            meetingPhase = "chooseVotingFormat";
+            meetingHasStarted = true;
+            sendNewVote(createVotingModeVote());
+            break;
+
+        case "chooseVotingFormat":
+            meetingPhase = "chooseMods";
+            sendNewVote(createVoteModVote());
+            break;
+
+        case "chooseMods":
+            meetingPhase = "mainDiscussion";
+            break;
+
+        case "mainDiscussion":
+            meetingPhase = "decisionProcessDiscussion";
+            break;
+        
+        case "decisionProcessDiscussion":
+            break;
+            
+
+        default:
+            break;
+    }
+}
+
+
 
 function pushChatMessage(message) {
     chatMessages.push(message);
@@ -1109,6 +1346,27 @@ function pushChatMessage(message) {
    
 }
 
+
+
+function initWaitForMeetingStartWindow() {
+    switchOverlayWindow("waitForMeetingStart");
+
+}
+
+
+function updateWaitForMeetingStartWindowHTML() {
+    /**
+     * Updates the HTML of the wait for meeting start-window
+     */
+    $("#overlayNumberOfUsersReady").html(usersReadyForMeeting.length + "/" + userList.length + " Teilnehmer*Innen sind bereit.");
+    if (usersReadyForMeeting.length == userList.length) {
+        goToNextMeetingPhase();
+        switchOverlayWindow("");
+    }
+    if (meetingPhase != "" && meetingPhase != "waitForMeetingToStart") {
+        switchOverlayWindow("");
+    }
+}
 
 function updateUserListHTML() {
     /**
@@ -1378,16 +1636,17 @@ function createRemoveModVote(users=-1) {
 $(document).ready(function() {
     
     
-    voteWizardInit();
-
-    switchScreen("login");
+    // voteWizardInit();
 
 
     $("#overlayWindow").hide();
     $("#overlayNewVoteDiv").hide();
+    $("#overlayWaitForMeetingDiv").hide();
+
+    switchScreen("login");
 
     $("#loginButton").click(function() {
-        var user = $("#usernameInput").val();
+        let user = $("#usernameInput").val();
         var pass = $("#passwordInput").val();
         tryLogin(user, pass);
     });
@@ -1419,6 +1678,11 @@ $(document).ready(function() {
         tryJoinRoom($("#roomSelectInput").val());
     });
 
+    $("#overlayWaitForMeetingReadyButton").click(function() {
+        sendReadyForMeeting();
+        
+    })
+
     $("#sendVoteButton").click(function() {
         if (currentVote.isFinished) {
             return;
@@ -1443,6 +1707,10 @@ $(document).ready(function() {
         else {
             alert("Couldn't finish vote: Vote result does not match the requirements of its voting mode.");
         }
+    });
+
+    $("#startDecisionProcessButton").click(function() {
+        sendStartDecisionProcess();
     });
 
     $("#newVoteButton").click(function() {
