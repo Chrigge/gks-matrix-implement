@@ -7,7 +7,7 @@ var registerUrl = baseUrl + "/register?kind=user";
 var longpollFrom = "END";
 
 var accountInfo = {}; // Contains the account response from the API
-var userInfo = {}; // Contains user info/stats (e.g. user name)
+var userInfo = {}; // Contains user info/stats (e.g. user name) / DEPRECATED, use myself
 
 var eventLoopActive = true; // Whether to continue the event loop
 
@@ -16,8 +16,10 @@ var userList = [];
 
 var currentVote = null;
 var voteInWizard = null;
+var globalVotingMode = null;
 
 var meetingHasStarted = false;
+var meetingPhase = 0;
 
 var pastRandomStrings = []; // Contains a list of previously generated strings for the generateRandomString()
 
@@ -27,13 +29,14 @@ var originalTimestamp = Number.MAX_VALUE; // Contains the timestamp of when the 
 var myself = null; // User object representing the local user.
 
 class User {
-    constructor(name, joined=-1, id=-1) {
+    constructor(name, joined=-1, id=-1, role="normal") {
         /**
          * Represents a user in the room.
          * There should also be an instance for the local user him-/herself.
          * @param name Name of the user as given by the Matrix API
          * @param joined Timestamp of when the user joined. Default to $.now().
          * @param id Unique ID for this user. Defaults to a random ID.
+         * @param role This user's role. One of "normal", "mod", "spectator". Defaults to "normal".
          */
 
         if (id < 0) {
@@ -47,33 +50,40 @@ class User {
         this.name = name;
         this.joined = joined;
         this.id = id;
-        
+        this.role = role;
     }
 
     toString() {
-        return this.name;
+        var prefix = "";
+        if (this.role == "mod") {
+            prefix += "(m) ";
+        }
+        return prefix + this.name;
     }
 
     toJSON() {
         return '{'
             + '"id": "' + this.id + '",'
             + '"name": "' + this.name + '",'
-            + '"joined": "' + this.joined + '"'
+            + '"joined": "' + this.joined + '",'
+            + '"role": "' + this.role + '"'
             + '}';
     }
 }
 
 class ChatMessage {
-    constructor(author, message, timestamp) {
+    constructor(author, message, timestamp, values) {
         /**
          * Represents a single message in the chat.
          * @param author author of the message
          * @param message message body
          * @param timestamp timestamp of the message
+         * @param values extra values/parameters that are not shown for vote result effects etc.
          */
         this.author = author;
         this.message = message;
         this.timestamp = timestamp;
+        this.values = values;
     }
 
     toString() {
@@ -90,7 +100,7 @@ class ChatMessage {
 }
 
 class Vote {
-    constructor(title, desc, voteItems = [], id = "", mode = "consensus") {
+    constructor(title, desc, voteItems = [], id = "", mode = "consensus", effectType = "") {
         /**
          * Represents a vote. This contains a list of voteItems, i.e. things you can vote for.
          * @param title Title of the vote. Should be short & concise.
@@ -98,12 +108,14 @@ class Vote {
          * @param voteItems List of voteItems, i.e. the things you can vote for. These can also be added later @TODO
          * @param id Unique identifier of this VoteItem (should be the same across each client for this VoteItem). If left blank, it will be auto-generated.
          * @param mode Voting mode. One of "consensus", "absMajority", "relMajority".
+         * @param effectType What (and if) something special should happen due to the result. One of "", "voteMod", "removeMod", "votingMode". Defaults to "".
          */
         this.title = title;
         this.desc = desc;
         this.voteItems = voteItems;
         this.id = id;
         this.mode = mode;
+        this.effectType = effectType;
         if (id == "") {
             var _id = $.now() + "-" + generateRandomString();
             this.id = _id;
@@ -116,9 +128,14 @@ class Vote {
 
     toJSON() {
         var voteItemsJSON = []
-        for (var i = 0; i < this.voteItems.length; i++) {
+        for (let i = 0; i < this.voteItems.length; i++) {
             voteItemsJSON.push(this.voteItems[i].toJSON());
         }
+        
+        var effectJSON = '{'
+            + ' "type": "' + this.effectType// + '",'
+           // + ' "target":' + this.effectTarget + '"'
+            + '" }';
 
         var s = '{'
             + '"title": "' + this.title
@@ -127,6 +144,7 @@ class Vote {
             + '", "mode": "' + this.mode
             + '", "voteItems": [' + voteItemsJSON + ']'
             + ', "isFinished": ' + this.isFinished
+            + ', "effect": ' + effectJSON
             + '}';
         
         return s;
@@ -142,7 +160,7 @@ class Vote {
         var s = "";
         s += "<div class='voteTitle'>" + this.title + "</div>";
         s += "<div class='voteDesc'>" + this.desc + "</div>";
-        for (var i = 0; i < this.voteItems.length; i++) {
+        for (let i = 0; i < this.voteItems.length; i++) {
             var isEven = (i % 2 == 0);
             s += voteItems[i].constructHTML(isEven);
         }
@@ -156,7 +174,7 @@ class Vote {
          * @param id the id of the VoteItem
          * @return the VoteItem that was found, or null if nothing was found.
          */
-        for (var i = 0; i < this.voteItems.length; i++) {
+        for (let i = 0; i < this.voteItems.length; i++) {
             var item = this.voteItems[i];
             if (item.id == id) {
                 return item;
@@ -171,7 +189,7 @@ class Vote {
          * @return an array of VoteItem that are selected/voted for by the user
          */
         var list = [];
-        for (var i = 0; i < this.voteItems.length; i++) {
+        for (let i = 0; i < this.voteItems.length; i++) {
             if (this.voteItems[i].isSelected) {
                 list.push(this.voteItems[i]);
             }
@@ -193,36 +211,110 @@ class Vote {
             return null;
         }
 
-        var tally = [];
-        var maxVotedItem = this.voteItems[0];
+        let valid = false;
+        let tally = [];
+        let multipleBestItems = false;
+        let numberOfItemsWithAtLeastOneVote = 0;
+        let maxVotedItem = this.voteItems[0];
         // Get the tally for each voteItem and add a corresponding entry to the dict
-        for (var i = 0; i < this.voteItems.length; i++) {
-            var item = this.voteItems[i];
-            var entry = {item: item.votes};
+        for (let i = 0; i < this.voteItems.length; i++) {
+            let item = this.voteItems[i];
+            let entry = {item: item.votes};
+            
             tally.push(entry);
-            if (item.votes.size > maxVotedItem.votes,size) {
+            if (item.votes.size == maxVotedItem.votes.size) {
                 maxVotedItem = item;
+                multipleBestItems = true;
             }
+            else if (item.votes.size > maxVotedItem.votes.size) {
+                maxVotedItem = item;
+                multipleBestItems = false;
+
+            }
+            
+
+            if (item.votes.size > 0) {
+                numberOfItemsWithAtLeastOneVote++;
+            }
+        }
+
+        let result = null;
+        
+        switch (this.mode) {
+            case "relMajority":
+                if (!multipleBestItems) {
+                    result = maxVotedItem;
+                    valid = true;
+                }
+                break;
+            
+            case "absMajority":
+                if (!multipleBestItems && maxVotedItem.votes.size > (Math.floor(userList.size / 2))) {
+                    result = maxVotedItem;
+                    valid = true;
+                }
+            
+            case "consensus":
+                if (numberOfItemsWithAtLeastOneVote == 1) {
+                    result = maxVotedItem;
+                    valid = true;
+                }
         }
 
         return {
             result: maxVotedItem,
-            tally: tally
+            tally: tally,
+            valid: valid
         };
     }
 
     finishVote() {
         /**
          * Ends the voting process for this Vote and gets the result.
+         * Also applies special effects if any are specified.
          */
-        this.isFinished = true;
         this.result = this.getResult();
+        if (!this.result.valid) {
+            this.result = null;
+            return false;
+        }
+        this.isFinished = true;
         updateVoteHTML(currentVote);
+        switch (currentVote.effectType) {
+            case "":
+                break;
+            
+            case "voteMod":
+                let newMod = getUserByUserID(this.result.result.values.userID);
+                if (newMod != null) {
+                    newMod.role = "mod";
+
+                }
+                updateUserListHTML();
+                console.log("made " + newMod.name + " a mod!");
+                break;
+            
+            case "removeMod":
+                let oldMod = getUserByUserID(this.result.result.values.userID);
+                if (oldMod != null) {
+                    oldMod.role = "normal";
+                }
+                updateUserListHTML();
+                console.log("removed " + oldMod.name + "'s mod status");
+                break;
+            
+            case "votingMode":
+                globalVotingMode = JSON.parse(this.result.result.values).mode;
+                console.log(globalVotingMode);
+                break;
+        }
+        
+        return true;
     }
 }
 
 class VoteItem {
-    constructor(vote, desc, id = "") {
+    constructor(vote, desc, id = "", values = {}) {
         /**
          * Represents a single item in a vote that can be voted for. Also stores current votes.
          * @param vote The instance of Vote this VoteItem belongs to.
@@ -233,6 +325,7 @@ class VoteItem {
         this.desc = desc;
         this.votes = new Set();
         this.id = id;
+        this.values = values;
         if (id == "") {
             var _id = vote.id + $.now() + "-" + generateRandomString();
             this.id = _id;
@@ -249,7 +342,7 @@ class VoteItem {
     toJSON() {
         var votesStr = "";
         var votesArr = Array.from(this.votes);
-        for (var i = 0; i < votesArr.length; i++) {
+        for (let i = 0; i < votesArr.length; i++) {
             votesStr += votesArr[i];
             if (i < votesArr.length - 1) {
                 votesStr += ", ";
@@ -258,7 +351,9 @@ class VoteItem {
         return '{ "desc": "' + this.desc
          + '", "id": "' + this.id
          + '", "votes": [' + votesStr
-         + ']}';
+         + ']'
+         + ', "values": ' + JSON.stringify(this.values)
+         + '}';
     }
 
     setIsSelected(isSelected) {
@@ -327,7 +422,6 @@ function switchOverlayWindow(windowType) {
     }
 }
 
-
 function voteWizardInit() {
     /**
      * Opens the voting wizard window and puts a new, empty Vote object into voteInWizard.
@@ -351,10 +445,10 @@ function voteWizardFinalize() {
     /**
      * Applies the created Vote as the current vote, closes window, broadcasts it etc.
      */
-    currentVote = voteInWizard;
+    // currentVote = voteInWizard;
     switchOverlayWindow("");
     // updateVoteHTML(currentVote);
-    updateVoteHTML(voteInWizard);
+    // updateVoteHTML(voteInWizard);
 }
 
 function voteWizardUpdateHTML() {
@@ -635,6 +729,22 @@ function sendUserLeave() {
 }
 
 
+function sendChangeUserRole(userID, newRole) {
+    /**
+     * Sends a message to all participants signalling that a user has changed his/her role.
+     * @param userID id of the user with new role
+     * @param newRole new role for the user.
+     */
+
+    var msg = {
+        msgtype: 'm.changeuserrole',
+        body: '{ "userID": "' + userID + '", "newRole": "' + newRole + '" }' 
+    };
+
+    sendMessage(msg);
+}
+
+
 function sendNewVote(vote) {
     /**
      * Sends a message to all participants signalling that a new vote has started
@@ -645,7 +755,9 @@ function sendNewVote(vote) {
 
     var msg = {
         msgtype: "m.newvote",
-        body: '{"currentVote": ' + vote.toJSON() + '}'
+        body: '{"currentVote": ' + vote.toJSON() + ','
+            + '"origin": "' + myself.id + '"'
+            + '}'
     };
 
     sendMessage(msg);
@@ -706,7 +818,7 @@ function sendVotedItem(votedItemID, voteID) {
  * @param voteID contains the ID of the vote that finished.
  */
     var votedItemStr = "";
-    for (var i = 0; i < votedItemID.length; i++) {
+    for (let i = 0; i < votedItemID.length; i++) {
         votedItemStr += '"' + votedItemID[i] + '"';
         if (i < votedItemID.length - 1) {
             votedItemStr += ", "
@@ -815,7 +927,7 @@ function processReceivedEvents(data) {
     console.log(events);
 
     // Cycle through events and process them one-by-one
-    for (var i = 0; i < events.length; i++) {
+    for (let i = 0; i < events.length; i++) {
         var event = events[i];
         var result = JSON.parse(event.content.body);
         console.log(result);
@@ -830,7 +942,7 @@ function processReceivedEvents(data) {
 
             case "m.userenter":
                 var userData = result.user;
-                var user = new User(userData.name, userData.joined, userData.id);
+                var user = new User(userData.name, userData.joined, userData.id, userData.role);
                 userList.push(user);
                 updateUserListHTML();
                 break;
@@ -838,7 +950,7 @@ function processReceivedEvents(data) {
             case "m.userleave":
                 var id = result.user.id;
                 var _user = null;
-                for (var j = 0; j < userList.length; j++) {
+                for (let j = 0; j < userList.length; j++) {
                     _user = userList[j];
                     if (_user.id == id) {
                         userList.splice(j, 1);
@@ -846,18 +958,46 @@ function processReceivedEvents(data) {
                 }
                 if (_user != null) {
                     console.log("User " + id + " left");
-                    chatMessages.add(new ChatMessage("system", _user.name + " hat den Chat verlassen", $.now()))
+                    chatMessages.push(new ChatMessage("system", _user.name + " hat den Chat verlassen", $.now()))
                 }
                 else {
                     console.log("User that left wasn't in the user list");
                 }
                 updateUserListHTML();
                 break;
+            
+
+            case "m.changeuserrole":
+                var _user = null;
+                for (let i = 0; i < userList.length; i++) {
+                    _user = userList[i];
+                    if (_user.id == result.userID) {
+                        break;
+                    }
+                }
+                if (_user != null) {
+                    _user.role = result.newRole;
+                }
+                updateChatMessagesHTML();
+                updateUserListHTML();
+                break;
 
             
             case "m.newvote":
                 var vote = getVoteFromMessage(result.currentVote);
-                currentVote = vote;
+                
+                if (getUserByUserID(result.origin).role == "mod" || vote.effectType == "voteMod" 
+                                                                 || vote.effectType == "removeMod"
+                                                                 || (getModList().length == 0 && vote.effectType == "votingMode")
+                                                                 || globalVotingMode == null) {
+                    currentVote = vote;
+                    console.log(getUserByUserID(result.origin));
+                }
+                else {
+                    // If the origin user wasn't a mod, try to resync the room instead.
+                    console.log("Insufficient permissions to create a vote");
+                    sendSyncMeetingRequest();
+                }
                 updateVoteHTML(currentVote);
                 break;
             
@@ -896,14 +1036,14 @@ function processReceivedEvents(data) {
                 }
                 
                 var l = 0;
-                for (var x = 0; x < currentVote.voteItems.length; x++) {
+                for (let x = 0; x < currentVote.voteItems.length; x++) {
                     var _item = currentVote.voteItems[x];
                     // Check if the author is already in a voteItem's votes and if so, remove him*her from the voteItem's set
                     if (_item.votes.has(author)) {
                         _item.votes.delete(author);
                     }
                     // Add author to corresponding voteItem's votes
-                    for (var j = 0; j < ids.length; j++) {
+                    for (let j = 0; j < ids.length; j++) {
                         if (_item.id == ids[j]) {
                             _item.votes.add(author);
                         }
@@ -935,15 +1075,15 @@ function processReceivedEvents(data) {
                     var newChatMessages = [];
                     var newUserList = [];
 
-                    for (var x = 0; x < result.chatMessages.length; x++) {
+                    for (let x = 0; x < result.chatMessages.length; x++) {
                         var msg = JSON.parse(result.chatMessages[i]);
                         newMsg = new ChatMessage(msg.author, msg.message, msg.timestamp);
                         newChatMessages.push(newMsg);
                     }
 
-                    for (var x = 0; x < result.userList.length; x++) {
+                    for (let x = 0; x < result.userList.length; x++) {
                         var msg = JSON.parse(result.userList[x]);
-                        _user = new User(msg.name, msg.joined, msg.id);
+                        _user = new User(msg.name, msg.joined, msg.id, msg.role);
                         newUserList.push(_user);
                     }
 
@@ -951,6 +1091,7 @@ function processReceivedEvents(data) {
                     userList = newUserList;
                     chatMessages = newChatMessages;
                     syncTimestamp = result.timestamp;
+                    meetingPhase = result.meetingPhase;
                     updateChatMessagesHTML();
                     updateUserListHTML();
                 }
@@ -974,7 +1115,7 @@ function updateUserListHTML() {
      * Updates the HTML of the user list.
      */
     var str = "";
-    for (var i = 0; i < userList.length; i++) {
+    for (let i = 0; i < userList.length; i++) {
         str += userList[i].toString() + "<br/>";
     }
     $("#chatUsers").html(str);
@@ -988,7 +1129,7 @@ function updateChatMessagesHTML() {
      */ 
     
     var str = "";
-    for (var i = 0; i < chatMessages.length; i++) {
+    for (let i = 0; i < chatMessages.length; i++) {
         str += chatMessages[i].toString() + "<br/>";
     }
     $("#chatMessages").html(str);
@@ -1017,7 +1158,7 @@ function updateVoteHTML(vote) {
 
     // Construct a div for each VoteItem and attach a click event handler, then append it to the div.
     // The div has an ID equal to the VoteItem instance's id-variable.
-    for (var i = 0; i < vote.voteItems.length; i++) {
+    for (let i = 0; i < vote.voteItems.length; i++) {
         var item = vote.voteItems[i];
         $("#chatVoting").append(item.constructHTML(i));
         var id = "#" + item.id;
@@ -1042,6 +1183,19 @@ function updateVoteHTML(vote) {
     return true;
 }
 
+function getUserByUserID(userID) {
+    /**
+     * Returns the user with the given userID (given that he/she is in the userList).
+     * @param userID id of the User to be found
+     * @return the User instance with the given id or null if none was found
+     */
+    for (let i = 0; i < userList.length; i++) {
+        if (userID == userList[i].id) {
+            return userList[i];
+        }
+    }
+    return null;
+}
 
 function getMeetingStateJSON() {
     /**
@@ -1054,11 +1208,11 @@ function getMeetingStateJSON() {
     var userListJSON = [];
     var currentVoteJSON = "{}";
     
-    for (var i = 0; i < chatMessages.length; i++) {
+    for (let i = 0; i < chatMessages.length; i++) {
         var _chatmsg = chatMessages[i];
         chatMessagesJSON.push(_chatmsg.toJSON());
     }
-    for (var i = 0; i < userList.length; i++) {
+    for (let i = 0; i < userList.length; i++) {
         var _user = userList[i];
         userListJSON.push(_user.toJSON());
     }
@@ -1070,7 +1224,8 @@ function getMeetingStateJSON() {
         timestamp: timestamp,
         currentVote: currentVoteJSON,
         chatMessages: chatMessagesJSON,
-        userList: userListJSON
+        userList: userListJSON,
+        meetingPhase: meetingPhase
     };
 
     return json;
@@ -1088,7 +1243,7 @@ function generateRandomString(len=15, maxattempts=100) {
      */
 
     // Try to generate a new random string and return it if successful
-    for (var i = 0; i < maxattempts; i++) {
+    for (let i = 0; i < maxattempts; i++) {
         var str = Math.random().toString(36).replace(/[^a-z]+/g, '').substr(0, len);
         if (!pastRandomStrings.includes(str)) {
             pastRandomStrings.push(str);
@@ -1099,6 +1254,17 @@ function generateRandomString(len=15, maxattempts=100) {
     // If no attempt was successful, append & return an empty string
     pastRandomStrings.push("");
     return "";
+}
+
+
+function getModList() {
+    let modList = [];
+    for (let i = 0; i < userList.length; i++) {
+        if (userList[i].role == "mod") {
+            modList.push(userList[i]);
+        }
+    }
+    return modList;
 }
 
 
@@ -1117,18 +1283,96 @@ function getVoteFromMessage(msg) {
         return null;
     }
     
-    var vote = new Vote(parsedMsg.title, parsedMsg.desc, [], parsedMsg.id, parsedMsg.mode);
+    var vote = new Vote(parsedMsg.title, parsedMsg.desc, [], parsedMsg.id, parsedMsg.mode, parsedMsg.effect.type);
     var voteItems = [];
     
-    for (var j = 0; j < parsedMsg.voteItems.length; j++) {
-        var item = new VoteItem(vote, parsedMsg.voteItems[j].desc, parsedMsg.voteItems[j].id);
+    for (let j = 0; j < parsedMsg.voteItems.length; j++) {
+        var item = new VoteItem(vote, parsedMsg.voteItems[j].desc, parsedMsg.voteItems[j].id, parsedMsg.voteItems[j].values);
         item.votes = new Set(parsedMsg.voteItems[j].votes);
         voteItems.push(item);
     }
     
     vote.voteItems = voteItems;
+    console.log(vote);
     return vote;
 }
+
+
+function createVotingModeVote() {
+    /**
+     * Do not confuse votingmodevote with modvote :) (mod = moderator, mode = mode for voting)
+     * Returns a Vote object representing a consensus vote that decides the main voting mode
+     *  especially for mod voting.
+     * Note that this is *always* consensus, as described in the paper.
+     * @return a Vote object representing a voting mode vote.
+     */
+    var list = ["consensus", "absMajority", "relMajority"];
+    var voteItems = [];
+    var vote = new Vote("Wahlverfahren-Abstimmung", "Wähle ein Wahlverfahren für künftige Entscheidungen. Diese Abstimmung ist immer eine Konsensentscheidung.");
+    vote.effectType = "votingMode";
+    voteItems = [
+        new VoteItem(vote, "Konsensverfahren", "", '{ "mode": "consensus" }'),
+        new VoteItem(vote, "Absolute Mehrheit", "",  '{ "mode": "absMajority" }'),
+        new VoteItem(vote, "Relative Mehrheit", "",  '{ "mode": "relMajority" }')
+    ];
+    vote.voteItems = voteItems;
+    return vote;
+}
+
+
+function createVoteModVote(users=-1) {
+    /**
+     * Returns a Vote object representing a mod vote.
+     * @param users List of Users that will be part of the vote. Defaults to the whole userList.
+     * @return a Vote object representing a mod vote.
+     */
+
+    var list = userList;
+    if (users == -1) {
+        list = userList;
+    }
+
+    var voteItems = [];
+    var vote = new Vote("Moderationswahl", "Wähle eine*n neue*n Moderator*in aus den vorgeschlagenen Personen!")
+    vote.effectType = "voteMod";
+    for (let i = 0; i < list.length; i++) {
+        let user = list[i];
+        let voteItem = new VoteItem(vote, user.name, "", { "userID": user.id });
+        voteItems.push(voteItem);
+    }
+    vote.voteItems = voteItems;
+
+    return vote;
+}
+
+
+function createRemoveModVote(users=-1) {
+    /**
+     * Returns a Vote object representing a mod removal vote.
+     * @param users List of Users that will be part of the vote. Defaults to the mod list.
+     * @return a Vote object representing a mod vote.
+     */
+
+    var modList = getModList();
+
+    var list = users;
+    if (users == -1) {
+        list = modList;
+    }
+
+    var voteItems = [];
+    var vote = new Vote("Abwahl der Moderation", "Wähle eine*n Moderator*in, die*der abgewählt werden soll.")
+    vote.effectType = "removeMod";
+    for (let i = 0; i < list.length; i++) {
+        let user = list[i];
+        let voteItem = new VoteItem(vote, user.name, "", { "userID": user.id });
+        voteItems.push(voteItem);
+    }
+    vote.voteItems = voteItems;
+
+    return vote;
+}
+
 
 
 $(document).ready(function() {
@@ -1141,7 +1385,6 @@ $(document).ready(function() {
 
     $("#overlayWindow").hide();
     $("#overlayNewVoteDiv").hide();
-    $("#debugButton").hide();
 
     $("#loginButton").click(function() {
         var user = $("#usernameInput").val();
@@ -1183,7 +1426,7 @@ $(document).ready(function() {
         // Get voted items & send them
         var itemList = currentVote.getVotedItems();
         var itemIDList = [];
-        for (var i = 0; i < itemList.length; i++) {
+        for (let i = 0; i < itemList.length; i++) {
             itemIDList.push(itemList[i].id);
         }
         sendVotedItem(itemIDList, currentVote.id);
@@ -1193,13 +1436,31 @@ $(document).ready(function() {
         if (currentVote == null) {
             return;
         }
-        currentVote.finishVote();
-        sendVoteFinished(currentVote.id);
+        var success = currentVote.finishVote();
+        if (success) {
+            sendVoteFinished(currentVote.id);
+        }
+        else {
+            alert("Couldn't finish vote: Vote result does not match the requirements of its voting mode.");
+        }
     });
 
     $("#newVoteButton").click(function() {
         voteWizardInit();
     });
+
+    $("#modVoteButton").click(function() {
+        sendNewVote(createVoteModVote());
+    });
+
+    $("#modRemoveButton").click(function() {
+        sendNewVote(createRemoveModVote());
+    });
+
+    $("#votingModeVoteButton").click(function() {
+        sendNewVote(createVotingModeVote());
+    });
+    
 
     $("#overlayWindowCloseButton").click(function() {
         switchOverlayWindow("");
@@ -1214,14 +1475,7 @@ $(document).ready(function() {
 
     $("#overlayNewVoteSubmit").click(function() {
         voteWizardFinalize();
-        sendNewVote(currentVote);
-    });
-
-
-
-    $("#debugButton").click(function() {
-        console.log("DEBUG:");
-        sendUserLeave();
+        sendNewVote(voteInWizard);
     });
 
 
@@ -1229,4 +1483,15 @@ $(document).ready(function() {
     $(window).on("beforeunload", function() { 
         sendUserLeave();
     });
+
+
+    $("#debugButton").click(function() {
+        console.log("DEBUG:");
+        sendChangeUserRole(myself.id, "mod");
+        
+    });
+
+
 });
+
+
