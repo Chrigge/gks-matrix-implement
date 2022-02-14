@@ -726,6 +726,9 @@ function sendMessage(msg) {
 function sendChatMessage(msg, msgType="msgStandard") {
             // Check if this user is a mod. Only highlight if this would be a msgStandard otherwise.
             let modList = getModList();
+            if (msgType == "msgStandard" && meetingPhase == "decisionProcessDiscussion" || meetingPhase == "decisionProcessVote") {
+                msgType = "msgDecProc";
+            }
             for (let i = 0; i < modList.length; i++) {
                 if (modList[i].id == myself.id && msgType == "msgStandard") {
                     msgType = "msgMod";
