@@ -74,29 +74,32 @@ class User {
 }
 
 class ChatMessage {
-    constructor(author, message, timestamp, values) {
+    constructor(author, message, timestamp, type) {
         /**
          * Represents a single message in the chat.
          * @param author author of the message
          * @param message message body
          * @param timestamp timestamp of the message
-         * @param values extra values/parameters that are not shown for vote result effects etc.
+         * @param type type of the message. 
+         *              This mainly influences the background color of this chat message to make it stand apart.
+         *              One of "msgStandard", "msgMod", "msgSys"
          */
         this.author = author;
         this.message = message;
         this.timestamp = timestamp;
-        this.values = values;
+        this.type = type;
     }
 
     toString() {
-        return "(" + this.timestamp + ") " + this.author + ": " + this.message;
+        return '<div class="' + this.type + '">' + this.author + ': ' + this.message + "</div>";
     }
 
     toJSON() {
         return '{'
             + '"author": "' + this.author + '",'
             + '"message": "'+ this.message + '",'
-            + '"timestamp": "' + this.timestamp + '"'
+            + '"timestamp": "' + this.timestamp + '",'
+            + '"type": "' + this.type + '"'
             + '}';
     }
 }
@@ -720,6 +723,24 @@ function sendMessage(msg) {
 }
 
 
+function sendChatMessage(msg, msgType="msgStandard") {
+            // Check if this user is a mod. Only highlight if this would be a msgStandard otherwise.
+            let modList = getModList();
+            for (let i = 0; i < modList.length; i++) {
+                if (modList[i].id == myself.id && msgType == "msgStandard") {
+                    msgType = "msgMod";
+                }
+            }               
+    
+            console.log(getModList());
+            var msg = { 
+                msgtype: "m.text",
+                body: '{"text": "' + msg + '",'
+                +     ' "type": "' + msgType + '"}' };
+            sendMessage(msg);
+}
+
+
 function sendUserEnter(user) {
     /**
      * Sends a message that signals that a user has entered the chat.
@@ -854,6 +875,19 @@ function sendNewVote(vote) {
     };
 
     sendMessage(msg);
+    sendChatMessage("Neue Abstimmung: " + vote.title, "msgSys");
+}
+
+function sendEndMeeting() {
+       /**
+    * Sends a notice to all clients that the meeting has ended.
+    * Clients will only accept this if they verified that the message was sent by either a mod or if there is no mod in the room.
+    */
+        var msg = {
+            msgtype: "m.endmeeting",
+            body: '{ "user": ' + myself.toJSON() + '}'
+        };
+
 }
 
 function sendSyncMeetingRequest() {
@@ -1028,7 +1062,7 @@ function processReceivedEvents(data) {
         
         switch (event.content.msgtype) {
             case "m.text": {
-                var message = new ChatMessage(event.sender, result.text, event.origin_server_ts);
+                var message = new ChatMessage(event.sender, result.text, event.origin_server_ts, result.type);
                 pushChatMessage(message);
                 break;
             }
@@ -1093,7 +1127,7 @@ function processReceivedEvents(data) {
                 if (oldestUser.id != result.user.id) {
                     break;
                 }
-                
+    
                 goToNextMeetingPhase();
                 break;
             }
@@ -1142,6 +1176,24 @@ function processReceivedEvents(data) {
                 break;
             }
 
+
+            case "m.endmeeting":
+                let eligiblePhases = ["mainDiscussion", "decisionProcessDiscussion", "decisionProcessVote"];
+                if (!(eligiblePhases.includes(meetingPhase))) {
+                    sendSyncMeetingRequest();
+                    break;
+                }
+                // Remove all mod powers
+                for (let i = 0; i < userList.length; i++) {
+                    if (getModList().includes(userList[i])) {
+                        userList[i].role = "";
+                    }
+                }
+                alert("Meeting has ended!");
+                updateUserListHTML();
+                updateChatMessagesHTML();
+                break;
+
             
             
 
@@ -1177,6 +1229,14 @@ function processReceivedEvents(data) {
                     console.log("Insufficient permissions to create a vote");
                     sendSyncMeetingRequest();
                 }
+                // Go to the next phase or re-sync if phases seem to be out of order
+                if (meetingPhase == "decisionProcessDiscussion") {
+                    goToNextMeetingPhase();
+                }
+                else {
+                    sendSyncMeetingRequest();
+                }
+                
                 updateVoteHTML(currentVote);
                 break;
             }
@@ -1193,7 +1253,14 @@ function processReceivedEvents(data) {
                     sendSyncMeetingRequest();
                     break;
                 }
-
+                // Go to the next phase or re-sync if phases seem to be out of order
+                if (meetingPhase == "decisionProcessVote") {
+                    goToNextMeetingPhase();
+                }
+                else {
+                    sendSyncMeetingRequest();
+                }
+                
                 // alert("Vote finished!" + result.voteID);
                 currentVote.finishVote();
                 break;
@@ -1330,6 +1397,13 @@ function goToNextMeetingPhase() {
             break;
         
         case "decisionProcessDiscussion":
+            meetingPhase = "decisionProcessVote";
+            alert("Finished discussing");
+            break;
+
+        case "decisionProcessVote":
+            meetingPhase = "mainDiscussion";
+            alert("Finished voting");
             break;
             
 
@@ -1362,6 +1436,7 @@ function updateWaitForMeetingStartWindowHTML() {
     if (usersReadyForMeeting.length == userList.length) {
         goToNextMeetingPhase();
         switchOverlayWindow("");
+        chatMessages.push(new ChatMessage("", "Willkommen im Chat!", $.now(), "msgSys"));
     }
     if (meetingPhase != "" && meetingPhase != "waitForMeetingToStart") {
         switchOverlayWindow("");
@@ -1388,7 +1463,7 @@ function updateChatMessagesHTML() {
     
     var str = "";
     for (let i = 0; i < chatMessages.length; i++) {
-        str += chatMessages[i].toString() + "<br/>";
+        str += chatMessages[i].toString();
     }
     $("#chatMessages").html(str);
  
@@ -1660,11 +1735,9 @@ $(document).ready(function() {
 
 
     $("#sendMessageButton").click(function() {
-        var msg = { 
-            msgtype: "m.text",
-            body: '{"text": "' + $("#messageTextInput").val() + '"}' };
-        sendMessage(msg);
+        sendChatMessage($("#messageTextInput").val());
     });
+    
 
     $("#selectRegistrationScreenButton").click(function() {
         switchScreen("register");
@@ -1710,7 +1783,9 @@ $(document).ready(function() {
     });
 
     $("#startDecisionProcessButton").click(function() {
-        sendStartDecisionProcess();
+        if (meetingPhase == "mainDiscussion") {
+            sendStartDecisionProcess();
+        }
     });
 
     $("#newVoteButton").click(function() {
@@ -1742,6 +1817,9 @@ $(document).ready(function() {
     });
 
     $("#overlayNewVoteSubmit").click(function() {
+        if (meetingPhase != "decisionProcessDiscussion") {
+            return;
+        }
         voteWizardFinalize();
         sendNewVote(voteInWizard);
     });

@@ -70,6 +70,18 @@
 }
 
 
+.msgStandard {
+    background-color: lightgray;
+}
+
+.msgMod {
+    background-color: lightcoral;
+}
+
+.msgSys {
+    background-color: lightskyblue;
+}
+
 
 
 .voteTitle {
