@@ -251,7 +251,6 @@ class Vote {
 
             }
             
-
             if (item.votes.size > 0) {
                 numberOfItemsWithAtLeastOneVote++;
             }
@@ -265,11 +264,14 @@ class Vote {
                     result = maxVotedItem;
                     valid = true;
                 }
+                else {
+                    alert("Multiple best imte");
+                }
                 break;
             
             case "absMajority":
                 alert(maxVotedItem.votes.size + "    " + (Math.floor(this.getTotalVotes() / 2)));
-                if (!multipleBestItems && maxVotedItem.votes.size > (Math.floor(this.getTotalVotes() / 2))) {
+                if (!multipleBestItems && maxVotedItem.votes.size > (Math.floor((this.getTotalVotes() + 1)/ 2))) {
                     result = maxVotedItem;
                     valid = true;
                 }
@@ -332,8 +334,16 @@ class Vote {
                 break;
             
             case "votingMode":
-                globalVotingMode = JSON.parse(this.result.result.values).mode;
-                console.log(globalVotingMode);
+                let mode = JSON.parse(this.result.result.values).mode;
+                console.log("XXXXXXXXXXX");
+                console.log(this.result.result);
+                if (mode == null) {
+                    sendSyncGlobalVotingMode();
+                }
+                else {
+                    globalVotingMode = mode;
+                }
+
 
                 // If this was a voting mode vote, advance the meeting phase and tell other clients.
                 if (meetingPhase == "chooseVotingFormat") {
@@ -739,7 +749,7 @@ function switchScreen(screen) {
         case "chat":
             // Switch to chat screen
             $("#chatScreen").toggle();
-
+            updateButtonsHTML();
             // Synchronize timestamps with current time
             syncTimestamp = $.now();
             originalTimestamp = syncTimestamp;
@@ -794,6 +804,21 @@ function sendMessage(msg) {
             console.log(errorData);
         }
     })
+}
+
+function sendSyncGlobalVotingMode() {
+    /** This is a hack to cover up a bug that sometimes sets the globaVotingMode to null
+     *   just before the first mod vote.
+     * @TODO
+     */
+    if (globalVotingMode == null) {
+        return;
+    }
+    
+    var msg = {
+        msgtype: 'm.syncglobalvotingmode',
+        body: '{ "globalVotingMode": "' + globalVotingMode + '"}'
+    };
 }
 
 
@@ -890,6 +915,7 @@ function sendModVotingPhase() {
        body: '{ "user": ' + myself.toJSON() + '}'
    };
 
+   
    sendMessage(msg);
 }
 
@@ -1016,8 +1042,6 @@ function sendVoteFinished(voteID) {
 function sendVotedItem(votedItemID, voteID) {
     /**
  * Sends a message to all participants containing the ID of the items voted for.
- * Should only be sent by moderators
- * @TODO mod verification
  * @param voteItemID contains the ID of the voteItem(s) that were chosen
  * @param voteID contains the ID of the vote that finished.
  */
@@ -1144,6 +1168,12 @@ function processReceivedEvents(data) {
                 break;
             }
 
+            case "m.syncglobalvotingmode":
+                if (result.globalVotingMode == null) {
+                    break;
+                }
+                globalVotingMode = result.globalVotingMode;
+
 
             case "m.userenter": {
                 var userData = result.user;
@@ -1249,7 +1279,6 @@ function processReceivedEvents(data) {
 
             case "m.startdecisionprocess": {
                 goToNextMeetingPhase();
-                alert("Start dec prco");
                 break;
             }
 
@@ -1266,7 +1295,7 @@ function processReceivedEvents(data) {
                         userList[i].role = "";
                     }
                 }
-                alert("Meeting has ended!");
+                alert("Ein*e Moderator*in hat das Meeting beendet.");
                 updateUserListHTML();
                 updateChatMessagesHTML();
                 break;
@@ -1287,6 +1316,7 @@ function processReceivedEvents(data) {
                 }
                 updateChatMessagesHTML();
                 updateUserListHTML();
+                updateButtonsHTML();
                 break;
             }
 
@@ -1313,7 +1343,7 @@ function processReceivedEvents(data) {
                 else {
                     sendSyncMeetingRequest();
                 }
-                
+                updateButtonsHTML();
                 updateVoteHTML(currentVote);
                 break;
             }
@@ -1326,26 +1356,24 @@ function processReceivedEvents(data) {
                 }
                  
                 if (currentVote.id != result.voteID) {
-                    console.log("Vote finished received, but got an unknown vote ID");
+                    // console.log("Vote finished received, but got an unknown vote ID");
                     sendSyncMeetingRequest();
                     break;
                 }
                 // Go to the next phase or re-sync if phases seem to be out of order
-                if (meetingPhase == "decisionProcessVote") {
+                if (meetingPhase == "decisionProcessVote" || meetingPhase == "chooseVotingFormat" || meetingPhase == "chooseMods") {
                     goToNextMeetingPhase();
                 }
                 else {
                     sendSyncMeetingRequest();
                 }
                 
-                // alert("Vote finished!" + result.voteID);
                 currentVote.finishVote();
                 break;
             }
             
 
             case "m.voteditem": {
-                // alert("wowoof");
                 var ids = result.votedItemID;
                 var author = event.sender;
                 if (currentVote == null) {
@@ -1374,6 +1402,15 @@ function processReceivedEvents(data) {
                         }
                     }
                 }
+
+                // If there is no moderator, send a sync request to see
+                // if everyone has voted (for the vote to end).
+                // if (!isModPresent() && isEveryoneDoneVoting()) {
+                //     sendSyncMeetingRequest();
+                // }
+
+                updateButtonsHTML();
+
                 updateVoteHTML(currentVote);
                 break;
             }
@@ -1386,7 +1423,7 @@ function processReceivedEvents(data) {
                     
                 }
                 else {
-                    console.log("Did not accept sync - request was ours or older than we are...");
+                    console.log(syncTimestamp + "-- " + result.timestamp + "Did not accept sync - request was ours or older than we are...");
                 }
                 break;
             }
@@ -1416,10 +1453,16 @@ function processReceivedEvents(data) {
                     chatMessages = newChatMessages;
                     syncTimestamp = result.timestamp;
                     meetingPhase = result.meetingPhase;
+                    if (result.globalVotingMode != null) {
+                        globalVotingMode = result.globalVotingMode;
+                    }
                     updateChatMessagesHTML();
                     updateUserListHTML();
                     updateWaitForMeetingStartWindowHTML();
                 }
+                updateButtonsHTML();
+
+
                 break;
             }
             
@@ -1462,7 +1505,11 @@ function goToNextMeetingPhase() {
 
         case "chooseVotingFormat":
             meetingPhase = "chooseMods";
-            sendNewVote(createVoteModVote());
+            // Only send vote if its actually legit (ie mode is not null)
+            let vote = createVoteModVote();
+            if (vote.mode != null) { 
+                sendNewVote(vote);
+            }
             break;
 
         case "chooseMods":
@@ -1475,12 +1522,10 @@ function goToNextMeetingPhase() {
         
         case "decisionProcessDiscussion":
             meetingPhase = "decisionProcessVote";
-            alert("Finished discussing");
             break;
 
         case "decisionProcessVote":
             meetingPhase = "mainDiscussion";
-            alert("Finished voting");
             break;
             
 
@@ -1546,6 +1591,22 @@ function updateChatMessagesHTML() {
  
 }
 
+function updateButtonsHTML() {
+    if (myself.role == "mod") {
+        $(".modOptionOnly").show();
+    }
+    else {
+        $(".modOptionOnly").hide();
+    }
+    let noVoteBool = false;
+    if (currentVote != null) {
+        noVoteBool = (currentVote.votingMode != "consensus")
+    }
+    if ((isEveryoneDoneVoting() || noVoteBool) && !isModPresent()) {
+        $("#finishVoteButton").show();
+    }
+}
+
 
 function updateVoteHTML(vote) {
     /**
@@ -1563,6 +1624,7 @@ function updateVoteHTML(vote) {
     var s = "";
     s += "<div class='voteTitle'>" + vote.title + "</div>";
     s += "<div class='voteDesc'>" + vote.desc + "</div>";
+    s += "<div class='voteMode'>Format: " + vote.mode + "</div>"
     $("#chatVoting").html(s);
 
 
@@ -1591,6 +1653,42 @@ function updateVoteHTML(vote) {
     }
 
     return true;
+}
+
+function isEveryoneDoneVoting() {
+    /**
+     * Slow and bad.
+     * @return whether each user is done voting
+     */
+    if (currentVote == null) {
+        return false;
+    }
+
+    let usersVoted = new Set();
+    for (let i = 0; i < currentVote.voteItems.length; i++) {
+        for (const value of currentVote.voteItems[i].votes) {
+            usersVoted.add(value);
+        }
+    }
+    
+    return usersVoted.size == userList.length;
+
+}
+
+function isModPresent() {
+    /**
+     * Returns whether a mod is present in the room
+     * @return whether a mod is present in the room
+     */
+    let foundMod = false;
+    for (let i = 0; i < userList.length; i++) {
+        let user = userList[i];
+        if (user.role == "mod") {
+            foundMod = true;
+        }
+    }
+    
+    return foundMod;
 }
 
 function getUserByUserID(userID) {
@@ -1635,7 +1733,8 @@ function getMeetingStateJSON() {
         currentVote: currentVoteJSON,
         chatMessages: chatMessagesJSON,
         userList: userListJSON,
-        meetingPhase: meetingPhase
+        meetingPhase: meetingPhase,
+        globalVotingMode: globalVotingMode
     };
 
     return json;
@@ -1737,6 +1836,8 @@ function createVoteModVote(users=-1) {
      * @return a Vote object representing a mod vote.
      */
 
+     
+
     var list = userList;
     if (users == -1) {
         list = userList;
@@ -1751,6 +1852,7 @@ function createVoteModVote(users=-1) {
         voteItems.push(voteItem);
     }
     vote.voteItems = voteItems;
+    vote.mode = globalVotingMode;
 
     return vote;
 }
@@ -1779,6 +1881,7 @@ function createRemoveModVote(users=-1) {
         voteItems.push(voteItem);
     }
     vote.voteItems = voteItems;
+    vote.mode = globalVotingMode;
 
     return vote;
 }
@@ -1794,6 +1897,7 @@ $(document).ready(function() {
     $("#overlayWindow").hide();
     $("#overlayNewVoteDiv").hide();
     $("#overlayWaitForMeetingDiv").hide();
+    $("#DebugButton").hide();
 
     switchScreen("login");
 
@@ -1855,7 +1959,7 @@ $(document).ready(function() {
             sendVoteFinished(currentVote.id);
         }
         else {
-            alert("Abstimmung konnte nicht abgeschlossen werden: Kein eindeutiges Wahlergebnis erreicht.");
+            alert("Abstimmung konnte nicht abgeschlossen werden: Kein eindeutiges Wahlergebnis erreicht. (Modus: " + currentVote.mode + ")");
         }
     });
 

@@ -77,19 +77,20 @@
                                 </form>
                             </div>
                         </div>
-                        <div class="chatUsersDiv chatScreenColumn">
-                            <div id="chatUsers"></div>
-                        </div>
-                        <div class="chatVotingDiv chatScreenColumn">
+
+                        <div class="chatVotingDiv voteColumn">
                             <div id="chatVoting"></div>
                             <input type="button" id="sendVoteButton" value="Vote!"></input>
-                            <input type="button" id="finishVoteButton" value="Finish voting!"></input>
-                            <input type="button" id="newVoteButton" value="Vote wizard"></input>
+                            <input type="button" id="finishVoteButton" class="modOptionOnly" value="Finish voting!"></input>
+                            <input type="button" id="newVoteButton" class="modOptionOnly" value="Vote wizard"></input>
                             <input type="button" id="modVoteButton" value="Vote new mod"></input>
                             <input type="button" id="modRemoveButton" value="Vote remove mod"></input>
                             <input type="button" id="votingModeVoteButton" value="Vote mode change"></input>
-                            <input type="button" id="startDecisionProcessButton" value="Start decision process"></input>
-                            <input type="button" id="endMeetingButton" value="End the meeting"></input>
+                            <input type="button" id="startDecisionProcessButton" class="modOptionOnly" value="Start decision process"></input>
+                            <input type="button" id="endMeetingButton" class="modOptionOnly" value="End the meeting"></input>
+                        </div>
+                        <div class="chatUsersDiv chatUsersColumn">
+                            <div id="chatUsers"></div>
                         </div>
                     </div>
                 </div>

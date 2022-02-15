@@ -55,6 +55,18 @@
 
 .chatScreenColumn {
     float: left;
+    width: 50%;
+    outline: 1px solid lightgray;
+}
+
+.chatUsersColumn {
+    float: left;
+    width: 16.66%;
+    outline: 1px solid lightgray;
+}
+
+.voteColumn {
+    float: left;
     width: 33.33%;
     outline: 1px solid lightgray;
 }
@@ -95,6 +107,11 @@
 .voteDesc {
     background-color: lightgray;
     font-size: 1em;
+}
+
+.voteMode {
+    background-color:lightgray;
+    font-size: 0.8em;
 }
 
 .voteItem {
@@ -162,7 +179,7 @@
     vertical-align: middle;
     
     outline: 1px solid black;
-    background-color: lightcyan;
+    background-color: rgb(25, 152, 156);
 }
 
 .voteWinningItem {
