@@ -202,6 +202,20 @@ class Vote {
         return list;
     }
 
+    getTotalVotes() {
+        /**
+         * Gets the total number of votes that are currently
+         *  in this vote
+         * @return number
+         */
+        let sum = 0;
+        for (let i = 0; i < this.voteItems.length; i++) {
+            sum += this.voteItems[i].votes.size;
+        }
+        return sum;
+
+    }
+
     getResult() {
         /**
          * Returns the result of the vote.
@@ -254,16 +268,19 @@ class Vote {
                 break;
             
             case "absMajority":
-                if (!multipleBestItems && maxVotedItem.votes.size > (Math.floor(userList.size / 2))) {
+                alert(maxVotedItem.votes.size + "    " + (Math.floor(this.getTotalVotes() / 2)));
+                if (!multipleBestItems && maxVotedItem.votes.size > (Math.floor(this.getTotalVotes() / 2))) {
                     result = maxVotedItem;
                     valid = true;
                 }
+                break;
             
             case "consensus":
                 if (numberOfItemsWithAtLeastOneVote == 1) {
                     result = maxVotedItem;
                     valid = true;
                 }
+                break;
         }
 
         return {
@@ -325,6 +342,7 @@ class Vote {
                 break;
         }
         
+        switchOverlayWindow("voteResult");
         return true;
     }
 }
@@ -428,6 +446,7 @@ function switchOverlayWindow(windowType) {
     $("#overlayWaitForMeetingDiv").hide();
     $("#overlayNewVoteDiv").hide();
     $("#overlayWindowCloseButton").hide();
+    $("#overlayVoteResultDiv").hide();
 
     switch(windowType) {
         case "voteWizard":
@@ -440,6 +459,13 @@ function switchOverlayWindow(windowType) {
             $("#overlayWindow").show();
             $("#overlayNewVoteDiv").hide();
             $("#overlayWaitForMeetingDiv").show();
+            break;
+        
+        case "voteResult":
+            $("#overlayWindow").show();
+            $("#overlayVoteResultDiv").show();
+            $("#overlayWindowCloseButton").show();
+            overlayVoteResultUpdateHTML();
             break;
 
         default:
@@ -497,6 +523,54 @@ function voteWizardUpdateHTML() {
             }
         });
     }
+}
+
+function overlayVoteResultUpdateHTML() {
+    /**
+     * Updates the vote result div of the overlay to
+     *  reflect the results of the recently finished vote.
+     */
+    if (currentVote == null) {
+        console.log("Tried to show vote results, but currentVote is null");
+        return;
+    }
+
+    let str = "";
+    if (!currentVote.isFinished) {
+        str += "Die Abstimmung läuft noch.";
+    }
+    let result = currentVote.getResult();
+    let totalVotes = currentVote.getTotalVotes();
+
+    if (totalVotes == 0 || result == null) {
+        return;
+    }
+
+    for (let i = 0; i < currentVote.voteItems.length; i++) {
+        let item = currentVote.voteItems[i];
+        let voteFrac = item.votes.size / totalVotes;
+        let votePerc = ((1 - voteFrac) * 100);
+        console.log(i + " ===== " + voteFrac + ">>>  " + votePerc);
+        let isWinnerStr = "";
+        let voteBarStr = item.desc + ': ' + item.votes.size + '/' + totalVotes;
+        let voteBarWrapperCss = 'top: ' + (i * 2) + 'em;'
+        let voteBarCss = 'left: 25%; right: ' + votePerc + '%;';
+                        //  +'top: ' + (i * 2) + 'em; height: .5em;'
+        // let voteBarStrCss = 'left: 0%; right: 15%;'
+        // +'top: ' + (i * 2) + 'em; height: .5em;'
+        if (item == result.result) {
+            isWinnerStr = ' voteWinningItem';
+        }
+        str += '<div class="voteResultItemWrapper" class="voteBarWrapper" style="' + voteBarWrapperCss + '">';
+        str +=      '<div class="voteResultItem' + isWinnerStr + '">'
+            +       voteBarStr + '</div>';
+        str +=      '<div class="voteResultItemBar" style="' + voteBarCss + '"></div>';
+        str += '</div>';
+    }
+
+    $("#overlayResultInfo").html('<b>Titel</b>: ' + currentVote.title + '<br/><b>Beschreibung</b>: ' + currentVote.desc + '<br/><b>Modus</b>: ' + currentVote.mode)
+    $("#overlayVoteResult").html(str);
+    
 }
 
 
@@ -1781,7 +1855,7 @@ $(document).ready(function() {
             sendVoteFinished(currentVote.id);
         }
         else {
-            alert("Couldn't finish vote: Vote result does not match the requirements of its voting mode.");
+            alert("Abstimmung konnte nicht abgeschlossen werden: Kein eindeutiges Wahlergebnis erreicht.");
         }
     });
 
@@ -1837,6 +1911,7 @@ $(document).ready(function() {
     $("#debugButton").click(function() {
         console.log("DEBUG:");
         sendChangeUserRole(myself.id, "mod");
+        switchOverlayWindow("voteResult");
         
     });
 
