@@ -264,13 +264,9 @@ class Vote {
                     result = maxVotedItem;
                     valid = true;
                 }
-                else {
-                    alert("Multiple best imte");
-                }
                 break;
             
             case "absMajority":
-                alert(maxVotedItem.votes.size + "    " + (Math.floor(this.getTotalVotes() / 2)));
                 if (!multipleBestItems && maxVotedItem.votes.size > (Math.floor((this.getTotalVotes() + 1)/ 2))) {
                     result = maxVotedItem;
                     valid = true;
@@ -409,12 +405,12 @@ class VoteItem {
          * @return whether it is possible to set isSelected or not according to the rules above. Does not say whether it was actually changed or not (i.e. if it was true before and should now be set to true)
          */
         if (this.vote == null) {
-            alert("This item does not have an associated Vote");
+            alert("Dieser Auswahl ist keine Wahl zugeordnet");
             return false;
         }
 
         if (this.vote.isFinished) {
-            alert("Vote has finished already");
+            alert("Diese Abstimmung ist bereits vorbei");
             return false;
         }
 
@@ -627,7 +623,7 @@ function tryRegister(user, pass, passRepeat) {
 
     // If the repeat of the password doesn't match the original, stop
     if (pass != passRepeat) {
-        alert("Passwords don't match!");
+        alert("Passwörter sind nicht die gleichen!");
         return false;
     }
 
@@ -647,12 +643,12 @@ function tryRegister(user, pass, passRepeat) {
         data: ajaxData,
         dataType: "json",
         success: function(data) {
-            alert("How did this succeed? We should get a 401 here");
+            alert("Hier sollte ein 401 entstehen - wieso haben wir eine 200 bekommen?");
         },
         error: function(responseData) {
             console.log(responseData);
             if (responseData.status != 401) {
-                alert("Something went wrong, try again");
+                alert("Irgendwas ist schiefgelaufen, versuch es noch einmal.");
             }
             else {
                 session = responseData.responseJSON.session;
@@ -675,12 +671,12 @@ function tryRegister(user, pass, passRepeat) {
                     data: auth,
                     dataType: "json",
                     success: function(responseData) {
-                        alert("User registration successful!");
+                        alert("Registrierung erfolgreich!");
                         console.log(responseData);
                         tryLogin(user, pass);
                     },
                     error: function(responseData) {
-                        alert(":(");
+                        alert("Irgendwas ist schiefgelaufen :(");
                         console.log(responseData);
                     }
                 });
@@ -709,7 +705,7 @@ function tryJoinRoom(room) {
             switchScreen("chat");
         },
         error: function(responseData) {
-            alert("Error joining room");
+            alert("Beitreten ist fehlgeschlagen");
             console.log(responseData);
         }
     });
@@ -1569,7 +1565,8 @@ function updateUserListHTML() {
     /**
      * Updates the HTML of the user list.
      */
-    var str = "";
+    var str = "You: " + myself.name + "<br/><br/>";
+
     for (let i = 0; i < userList.length; i++) {
         str += userList[i].toString() + "<br/>";
     }
@@ -1897,7 +1894,7 @@ $(document).ready(function() {
     $("#overlayWindow").hide();
     $("#overlayNewVoteDiv").hide();
     $("#overlayWaitForMeetingDiv").hide();
-    $("#DebugButton").hide();
+    $("#debugButton").hide();
 
     switchScreen("login");
 

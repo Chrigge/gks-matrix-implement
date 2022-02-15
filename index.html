@@ -15,7 +15,7 @@
 			integrity="sha256-H+K7U5CnXl1h5ywQfKtSj8PCmoN9aaq30gDh27Xc0jk="
 			crossorigin="anonymous"></script>
         <script src="client.js" type="text/javascript"></script>
-        <input type="button" id="debugButton" value="debug button"></input>
+        <!--<input type="button" id="debugButton" value="debug button"></input>!-->
         <div id="wrapper">
             <div id="mainWindow">
                 <div id="loginScreen">
@@ -25,10 +25,10 @@
                     <form class="loginForm">
                         Username: <input type="text" id="usernameInput" name="usernameInput"></label>
                         <br/>
-                        Password: <input type="password" id="passwordInput" name="passwordInput"></label>
+                        Passwort: <input type="password" id="passwordInput" name="passwordInput"></label>
                         <br/>
-                        <input type="button" id="loginButton" value="Log in!"></input>
-                        <input type="button" id="selectRegistrationScreenButton" value="Register instead"></input>
+                        <input type="button" id="loginButton" value="Einloggen"></input>
+                        <input type="button" id="selectRegistrationScreenButton" value="Zur Registrierung"></input>
                     </form>
                 </div>
 
@@ -39,21 +39,21 @@
                     <form class="registrationScreen">
                         Username: <input type="text" id="registrationUsernameInput"></label>
                         <br/>
-                        Password: <input type="password" id="registrationPasswordInput"></label>
+                        Passwort: <input type="password" id="registrationPasswordInput"></label>
                         <br/>
-                        Repeat Password: <input type="password" id="registrationPasswordRepeatInput"></label>
+                        Passwort wiederholen: <input type="password" id="registrationPasswordRepeatInput"></label>
                         <br/>
-                        <input type="button" id="registrationButton" value="Register!"></input>
-                        <input type="button" id="selectLoginScreenButton" value="Login instead"></input>
+                        <input type="button" id="registrationButton" value="Registrieren!"></input>
+                        <input type="button" id="selectLoginScreenButton" value="Zum Login"></input>
                     </form>
                 </div>
 
                 <div id="roomSelectScreen">
                     <h2>
-                        Select room
+                        Raum auswählen
                     </h2>
                     <form class="roomSelectScreen">
-                        Room name or ID: <input type="text" id="roomSelectInput" value="!HULaHFBnIxcwUEITua:gks-synapse"></label>
+                        Raumname oder -ID <input type="text" id="roomSelectInput" value="!HULaHFBnIxcwUEITua:gks-synapse"></label>
                         <br/>
                         <input type="button" id="roomSelectButton" value="Join room!"></input>
                     </form>
@@ -61,14 +61,21 @@
 
 
                 <div id="chatScreen">
-                    <h2>
+                    <!--<h2>
                         Chat screen
                     </h2>
-                    <p class="userInfo"></p>
-                    <br/><br/>
+                    <p class="userInfo"></p>!
+                    <br/><br/>-->
 
                     <div class="chatScreenRow">
-                        <div class="chatMessagesDiv chatScreenColumn">
+                        
+                        <div class="chatUsersDiv chatUsersColumn stretchToBottom">
+                            <div class="subHeading">Userliste</div>
+                            <div id="chatUsers"></div>
+                        </div>
+
+                        <div class="chatMessagesDiv chatScreenColumn stretchToBottom">
+                            <div class="subHeading">Chatfenster</div>
                             <div id="chatMessages"></div>
                             <div class="sendMessageDiv">
                                 <form class="sendMessage">
@@ -78,20 +85,19 @@
                             </div>
                         </div>
 
-                        <div class="chatVotingDiv voteColumn">
+                        <div class="chatVotingDiv voteColumn stretchToBottom">
+                            <div class="subHeading">Wahlbox</div>
                             <div id="chatVoting"></div>
-                            <input type="button" id="sendVoteButton" value="Vote!"></input>
-                            <input type="button" id="finishVoteButton" class="modOptionOnly" value="Finish voting!"></input>
+                            <input type="button" id="sendVoteButton" value="Stimme abgeben!"></input>
+                            <input type="button" id="finishVoteButton" class="modOptionOnly" value="Abstimmung beenden"></input>
                             <input type="button" id="newVoteButton" class="modOptionOnly" value="Vote wizard"></input>
-                            <input type="button" id="modVoteButton" value="Vote new mod"></input>
-                            <input type="button" id="modRemoveButton" value="Vote remove mod"></input>
-                            <input type="button" id="votingModeVoteButton" value="Vote mode change"></input>
-                            <input type="button" id="startDecisionProcessButton" class="modOptionOnly" value="Start decision process"></input>
-                            <input type="button" id="endMeetingButton" class="modOptionOnly" value="End the meeting"></input>
+                            <input type="button" id="modVoteButton" value="Neue Moderation wählen"></input>
+                            <input type="button" id="modRemoveButton" value="Moderator*in abwählen"></input>
+                            <input type="button" id="votingModeVoteButton" value="Wahlmodus ändern (Moderationswahl)"></input>
+                            <input type="button" id="startDecisionProcessButton" class="modOptionOnly" value="Entscheidungprozess beginnen"></input>
+                            <input type="button" id="endMeetingButton" class="modOptionOnly" value="Meeting beenden"></input>
                         </div>
-                        <div class="chatUsersDiv chatUsersColumn">
-                            <div id="chatUsers"></div>
-                        </div>
+
                     </div>
                 </div>
             </div>

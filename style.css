@@ -1,7 +1,28 @@
-.wrapper {
-    width: 100%;
+html {
+    width: 100wh;
     height: 100vh;
-    position: relative;
+    padding: 0;
+
+}
+
+.subHeading {
+    font-size: 1.2em;
+    border: 1px solid black;
+    background-color: gray;
+    text-align: center;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+}
+
+
+#wrapper {
+    
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    margin: 0;
 }
 
 #overlayWindow {
@@ -29,8 +50,13 @@
     outline: 1px solid darkslategray;
 }
 
+#chatUsers {
+    padding: 1em;
+}
+
 .mainWindow {
     position: absolute;
+    height: 100%;
 }
 
 
@@ -48,31 +74,49 @@
 
 
 .chatScreen {
+    position: absolute;
     align-items: stretch;
     width: 100%;
     height: 100%;
+    padding: 0;
+    margin: 0;
 }
 
 .chatScreenColumn {
     float: left;
     width: 50%;
-    outline: 1px solid lightgray;
 }
 
 .chatUsersColumn {
     float: left;
     width: 16.66%;
-    outline: 1px solid lightgray;
+    background-color: lightgray;
 }
 
 .voteColumn {
     float: left;
     width: 33.33%;
-    outline: 1px solid lightgray;
+    background-color: lightgray;
+}
+
+.sendMessageDiv {
+    position: absolute;
+    bottom: 0;
+    left: 16.66%;
+    width: 50%;
+    height: 2em;
+    padding: 1em;
+    background-color: lightgray;
+}
+
+
+.stretchToBottom {
+    height: 100%;
 }
 
 .chatScreenRow {
-    height:100vh;
+    position:absolute;
+    height:100%;
 }
 
 .chatScreenRow:after {
