@@ -1,11 +1,5 @@
 # gks-matrix-implement
-### Komplett Work in Progress!
+Implementierung eines auf Matrix basierenden Chatclients in (primär) JavaScript. Teil einer Hausarbeit des Kurses Gestaltung Kooperativer Systeme an der FU Hagen.
+Ziel des Clients ist, demokratische Prozesse in Gruppenchats/-besprechungen zu ermöglichen (z.B. Abstimmungen, Wahl des Abstimmungsverfahrens und der Moderationsrolle, etc.)
 
-Implementierung eines Matrix-Chatclient in JS, der experimentelle Tools zur Unterstützung (basis-)demokratischer Prozesse enthält.
-Geplant sind:
-
-* Abstimmungen
-* Untersuchung der Frage nach Rechte-/Rollenvergabe
-* Handzeichen
-
-Die Implementierung dient nur zur Untersuchung solcher Prozesse und ist deshalb nicht unbedingt als sinnvoll eigenständig nutzbarer Client gedacht.
+Die Implementierung dient zur Untersuchung solcher Prozesse und ist deshalb nicht unbedingt als sinnvoll eigenständig nutzbarer Client gedacht.
